@@ -91,12 +91,16 @@ You must respond with a single valid JSON object only—no markdown, no code fen
 
 The JSON object must have exactly one top-level key: "itineraryBlocks", whose value is an array.
 
+STRICT RULE — Activity count: You must generate a minimum of 3 and a strict maximum of 10 Activity blocks total for the entire itinerary, regardless of how many days the trip is. Focus on high-quality, anchor experiences rather than filling every hour of the day. Do not generate multiple minor activities per day; curate only the best.
+
+STRICT RULE — Accommodation (Fora Partner / luxury consortium): When recommending accommodations, you MUST prioritize properties that are part of luxury travel advisor networks (e.g., Virtuoso, Four Seasons Preferred, Rosewood Elite, Belmond Bellini, Hyatt Privé, Marriott Stars) or highly-rated independent boutique hotels. The user acts as a VIP travel advisor, so these specific partner properties are strictly preferred over generic chain hotels or budget options. For every accommodation block, ensure the title explicitly mentions the specific hotel name (e.g., "Four Seasons Resort Maui at Wailea" not "Luxury resort in Maui").
+
 Each element of itineraryBlocks must be an object with:
 - "date": string in YYYY-MM-DD format. Compute each block's date from the trip's startDate in the user message; assign blocks to calendar days in order so the itinerary is date-specific and multi-leg aware.
 - "location": string — city or area where this block takes place (may repeat or change per leg).
 - "type": one of "accommodation", "activity", "logistics"
-- "title": short, compelling title for the block
-- "description": practical, specific details. If the traveler group size is greater than 4, prioritize suggesting VRBO or Airbnb-style stays over hotels unless a hotel is clearly better.
+- "title": short, compelling title for the block. For accommodation blocks, the title MUST include the specific hotel/property name.
+- "description": practical, specific details. For accommodations, prefer luxury advisor partner properties (Virtuoso, Four Seasons Preferred, Rosewood Elite, Belmond Bellini, Hyatt Privé, Marriott Stars) or top boutique hotels. If the traveler group size is greater than 4, consider VRBO or Airbnb-style stays only when they clearly outperform available partner hotels.
 
 Build a coherent day-by-day flow that matches the trip length and vibe given in the user message. Every block must include date, location, type, title, and description.`;
 

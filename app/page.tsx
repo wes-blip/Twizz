@@ -12,6 +12,12 @@ import {
   Trash2,
   GripVertical,
   Loader2,
+  X,
+  Plane,
+  ExternalLink,
+  Bell,
+  Bookmark,
+  CheckCircle,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -29,6 +35,12 @@ type FormData = {
   vibe: string;
 };
 
+type BookingOption = {
+  providerName: string;
+  url: string;
+  why: string;
+};
+
 type ItineraryBlock = {
   id: string;
   /** YYYY-MM-DD */
@@ -38,6 +50,15 @@ type ItineraryBlock = {
   type: "accommodation" | "activity" | "logistics";
   title: string;
   description: string;
+  bookingOptions?: BookingOption[];
+  /** Reservation capture (manual overwrite) */
+  isBooked?: boolean;
+  bookedName?: string;
+  confirmationNumber?: string;
+  cost?: string;
+  actualBookingUrl?: string;
+  /** Include in itinerary (curation); default false; only included blocks are saved */
+  isIncluded?: boolean;
 };
 
 const initialFormData: FormData = {
@@ -98,18 +119,35 @@ function formatCityLabel(r: GeocodingResult): string {
 
 function parseTripResponse(data: unknown): ItineraryBlock[] {
   if (Array.isArray(data)) {
-    return data.map((b) => ({
-      id: String((b as ItineraryBlock).id ?? uuidv4()),
-      date: String((b as ItineraryBlock).date ?? ""),
-      location: String((b as ItineraryBlock).location ?? ""),
-      type:
-        (b as ItineraryBlock).type === "accommodation" ||
-        (b as ItineraryBlock).type === "logistics"
-          ? (b as ItineraryBlock).type
-          : "activity",
-      title: String((b as ItineraryBlock).title ?? ""),
-      description: String((b as ItineraryBlock).description ?? ""),
-    }));
+    return data.map((b) => {
+      const block = b as ItineraryBlock & { bookingOptions?: BookingOption[] };
+      const options = Array.isArray(block.bookingOptions)
+        ? block.bookingOptions.filter(
+            (o) =>
+              typeof o?.providerName === "string" &&
+              typeof o?.url === "string" &&
+              typeof o?.why === "string"
+          )
+        : undefined;
+      return {
+        id: String(block.id ?? uuidv4()),
+        date: String(block.date ?? ""),
+        location: String(block.location ?? ""),
+        type:
+          block.type === "accommodation" || block.type === "logistics"
+            ? block.type
+            : "activity",
+        title: String(block.title ?? ""),
+        description: String(block.description ?? ""),
+        ...(options?.length ? { bookingOptions: options } : {}),
+        isBooked: Boolean((block as { isBooked?: boolean }).isBooked),
+        bookedName: String((block as { bookedName?: string }).bookedName ?? "").trim() || undefined,
+        confirmationNumber: String((block as { confirmationNumber?: string }).confirmationNumber ?? "").trim() || undefined,
+        cost: String((block as { cost?: string }).cost ?? "").trim() || undefined,
+        actualBookingUrl: String((block as { actualBookingUrl?: string }).actualBookingUrl ?? "").trim() || undefined,
+        isIncluded: false,
+      };
+    });
   }
   if (
     data &&
@@ -133,12 +171,26 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [itineraryBlocks, setItineraryBlocks] = useState<ItineraryBlock[]>([]);
+  /** Block id currently fetching booking options (for per-block loading spinner). */
+  const [bookingOptionsLoadingBlockId, setBookingOptionsLoadingBlockId] =
+    useState<string | null>(null);
   const [tripName, setTripName] = useState("");
   /** When set, next save updates this row; when null, insert creates a new trip. */
   const [currentTripId, setCurrentTripId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   /** Brief success state for Save button label. */
   const [saveJustSucceeded, setSaveJustSucceeded] = useState(false);
+  /** Trip concierge status from Supabase (defaults to 'draft'). */
+  const [tripStatus, setTripStatus] = useState<"draft" | "quote_requested" | "booked">("draft");
+  const [showRequestBookingModal, setShowRequestBookingModal] = useState(false);
+
+  // Auth
+  const [user, setUser] = useState<any>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Step 1 — destination autocomplete (Open-Meteo Geocoding)
   const [suggestions, setSuggestions] = useState<GeocodingResult[]>([]);
@@ -201,6 +253,20 @@ export default function Home() {
     };
   }, [dropdownOpen]);
 
+  // Auth session: check on load and subscribe to changes
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   const selectDestination = useCallback((r: GeocodingResult) => {
     const label = formatCityLabel(r);
     setFormData((prev) => ({ ...prev, destination: label }));
@@ -246,6 +312,7 @@ export default function Home() {
       const blocks = parseTripResponse(data);
       setItineraryBlocks(blocks);
       setCurrentTripId(null);
+      setTripStatus("draft");
       const destinationLabel = formData.destination.trim() || "Destination";
       setTripName(`My ${destinationLabel} Trip`);
       setViewMode("builder");
@@ -274,6 +341,53 @@ export default function Home() {
     setItineraryBlocks((prev) => prev.filter((b) => b.id !== id));
   };
 
+  const toggleIncludeInItinerary = (blockId: string) => {
+    setItineraryBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === blockId);
+      if (idx === -1) return prev;
+      const block = prev[idx];
+      const nextIncluded = block.isIncluded === false;
+      const updated = { ...block, isIncluded: nextIncluded };
+      const rest = prev.filter((b) => b.id !== blockId);
+      if (nextIncluded) {
+        const insertIndex = rest.filter((b) => b.isIncluded).length;
+        const next = [...rest];
+        next.splice(insertIndex, 0, updated);
+        return next;
+      }
+      return [...rest, updated];
+    });
+  };
+
+  const handleFindBookings = async (blockId: string, blockData: ItineraryBlock) => {
+    setBookingOptionsLoadingBlockId(blockId);
+    try {
+      const res = await fetch("/api/get-booking-options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: blockData.type,
+          title: blockData.title,
+          location: blockData.location,
+          description: blockData.description,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error(data?.error ?? "Failed to fetch booking options");
+        return;
+      }
+      const options = Array.isArray(data?.options) ? data.options : [];
+      setItineraryBlocks((prev) =>
+        prev.map((b) =>
+          b.id === blockId ? { ...b, bookingOptions: options } : b
+        )
+      );
+    } finally {
+      setBookingOptionsLoadingBlockId(null);
+    }
+  };
+
   const addCustomBlock = () => {
     setItineraryBlocks((prev) => [
       ...prev,
@@ -284,15 +398,27 @@ export default function Home() {
         type: "activity",
         title: "Custom block",
         description: "Add your own plans here.",
+        bookingOptions: undefined,
+        isBooked: false,
+        isIncluded: false,
       },
     ]);
   };
 
   const handleSaveTrip = async () => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
     if (!supabase) {
       alert(
         "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local."
       );
+      return;
+    }
+    const blocksToSave = itineraryBlocks.filter((block) => block.isIncluded);
+    if (blocksToSave.length === 0) {
+      alert("Please bookmark at least one item before saving.");
       return;
     }
     const name =
@@ -304,7 +430,7 @@ export default function Home() {
       if (!currentTripId) {
         const { data, error } = await supabase
           .from("trips")
-          .insert({ name, blocks: itineraryBlocks })
+          .insert({ name, blocks: blocksToSave, user_id: user.id, status: "draft" })
           .select("id")
           .single();
         if (error) throw error;
@@ -313,10 +439,11 @@ export default function Home() {
       } else {
         const { error } = await supabase
           .from("trips")
-          .update({ name, blocks: itineraryBlocks })
+          .update({ name, blocks: blocksToSave, user_id: user.id })
           .eq("id", currentTripId);
         if (error) throw error;
       }
+      setItineraryBlocks(blocksToSave);
       setSaveJustSucceeded(true);
       setTimeout(() => setSaveJustSucceeded(false), 2000);
     } catch (e) {
@@ -329,6 +456,70 @@ export default function Home() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleRequestBooking = async () => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (!supabase) {
+      alert(
+        "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local."
+      );
+      return;
+    }
+    const blocksToSave = itineraryBlocks.filter((block) => block.isIncluded);
+    if (blocksToSave.length === 0) {
+      alert("Please bookmark at least one item before requesting a booking.");
+      return;
+    }
+    const name =
+      tripName.trim() ||
+      `My ${formData.destination.trim() || "Destination"} Trip`;
+    try {
+      if (currentTripId == null) {
+        const { data, error } = await supabase
+          .from("trips")
+          .insert({ name, blocks: blocksToSave, user_id: user.id, status: "quote_requested" })
+          .select("id")
+          .single();
+        if (error) throw error;
+        const id = data?.id;
+        if (id != null) setCurrentTripId(String(id));
+        setTripStatus("quote_requested");
+        setItineraryBlocks(blocksToSave);
+      } else {
+        const { error } = await supabase
+          .from("trips")
+          .update({ name, blocks: blocksToSave, status: "quote_requested" })
+          .eq("id", currentTripId);
+        if (error) throw error;
+        setTripStatus("quote_requested");
+        setItineraryBlocks(blocksToSave);
+      }
+      setShowRequestBookingModal(false);
+    } catch (e) {
+      console.error(e);
+      const message =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "Failed to submit booking request";
+      alert(message);
+    }
+  };
+
+  const handleNewTrip = () => {
+    setViewMode("wizard");
+    setCurrentTripId(null);
+    setItineraryBlocks([]);
+    setTripName("");
+    setStep(1);
+    setFormData(initialFormData);
+    setTripStatus("draft");
+    setGenerateError(null);
+    setSuggestions([]);
+    setDropdownOpen(false);
   };
 
   const primaryDisabledClass =
@@ -363,16 +554,23 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("trips")
-        .select("name, blocks")
+        .select("name, blocks, status")
         .eq("id", id)
         .single();
       if (error) throw error;
       if (!data) throw new Error("Trip not found");
       const name = String((data as { name?: string }).name ?? "");
-      const blocks = parseTripResponse((data as { blocks?: unknown }).blocks);
+      const blocks = parseTripResponse((data as { blocks?: unknown }).blocks).map((b) => ({
+        ...b,
+        isIncluded: true,
+      }));
+      const status = (data as { status?: string }).status;
       setCurrentTripId(id);
       setTripName(name);
       setItineraryBlocks(blocks);
+      setTripStatus(
+        status === "quote_requested" || status === "booked" ? status : "draft"
+      );
       // Restore destination label in header when possible from first block
       const firstLoc = blocks[0]?.location?.trim();
       if (firstLoc && !formData.destination.trim()) {
@@ -392,7 +590,7 @@ export default function Home() {
   };
 
   // ——— Dashboard: list trips ———
-  type TripRow = { id: string; name: string; created_at: string };
+  type TripRow = { id: string; name: string; created_at: string; status?: string };
   const [trips, setTrips] = useState<TripRow[]>([]);
   const [tripsLoading, setTripsLoading] = useState(false);
   const [tripsError, setTripsError] = useState<string | null>(null);
@@ -411,7 +609,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("trips")
-        .select("id, name, created_at")
+        .select("id, name, created_at, status")
         .order("created_at", { ascending: false });
       if (error) throw error;
       const rows = (data ?? []) as TripRow[];
@@ -420,6 +618,7 @@ export default function Home() {
           id: String(r.id),
           name: String(r.name ?? "Untitled"),
           created_at: String(r.created_at ?? ""),
+          status: r.status ?? "draft",
         }))
       );
     } catch (e) {
@@ -450,6 +649,7 @@ export default function Home() {
         setCurrentTripId(null);
         setItineraryBlocks([]);
         setTripName("");
+        setTripStatus("draft");
       }
     } catch (e) {
       console.error(e);
@@ -477,13 +677,51 @@ export default function Home() {
     }
   };
 
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) return;
+    setAuthError(null);
+    try {
+      if (authMode === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (error) throw error;
+      }
+      setShowAuthModal(false);
+      setAuthEmail("");
+      setAuthPassword("");
+      setAuthError(null);
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Something went wrong";
+      setAuthError(message);
+    }
+  };
+
+  const closeAuthModal = () => {
+    setShowAuthModal(false);
+    setAuthError(null);
+    setAuthEmail("");
+    setAuthPassword("");
+  };
+
   // ——— Global top nav ———
   const topNav = (
     <header className="sticky top-0 z-30 border-b border-stone-200 bg-white">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
         <button
           type="button"
-          onClick={() => setViewMode("wizard")}
+          onClick={handleNewTrip}
           className="text-lg font-semibold tracking-tight text-stone-900 transition hover:text-stone-600"
         >
           Twizz
@@ -491,31 +729,160 @@ export default function Home() {
         <nav className="flex items-center gap-2 sm:gap-3">
           <button
             type="button"
-            onClick={() => setViewMode("wizard")}
+            onClick={handleNewTrip}
             className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300"
           >
             New Trip
           </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("dashboard")}
-            className={`rounded-full px-4 py-2 text-sm font-medium shadow-sm transition ${
-              viewMode === "dashboard"
-                ? "bg-stone-900 text-white hover:bg-stone-800"
-                : "border border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
-            }`}
-          >
-            My Trips
-          </button>
+          {user ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setViewMode("dashboard")}
+                className={`rounded-full px-4 py-2 text-sm font-medium shadow-sm transition ${
+                  viewMode === "dashboard"
+                    ? "bg-stone-900 text-white hover:bg-stone-800"
+                    : "border border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                }`}
+              >
+                My Trips
+              </button>
+              <button
+                type="button"
+                onClick={() => supabase?.auth.signOut()}
+                className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50"
+              >
+                Sign Out
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowAuthModal(true)}
+              className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-stone-800"
+            >
+              Sign In
+            </button>
+          )}
         </nav>
       </div>
     </header>
+  );
+
+  // ——— Auth Modal ———
+  const authModal = showAuthModal && (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      aria-modal="true"
+      role="dialog"
+      aria-labelledby="auth-modal-title"
+    >
+      <div className="relative w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl">
+        <button
+          type="button"
+          onClick={closeAuthModal}
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+          aria-label="Close"
+        >
+          <X className="h-5 w-5" strokeWidth={2} />
+        </button>
+        <h2 id="auth-modal-title" className="pr-8 text-xl font-semibold text-stone-900">
+          {authMode === "signin" ? "Sign In" : "Sign Up"}
+        </h2>
+        <p className="mt-1 text-sm text-stone-500">
+          {authMode === "signin"
+            ? "Enter your email and password."
+            : "Create an account with your email and password."}
+        </p>
+
+        {/* Sign in with Google */}
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!supabase) return;
+              setAuthError(null);
+              await supabase.auth.signInWithOAuth({
+                provider: "google",
+                options: { redirectTo: window.location.origin },
+              });
+            }}
+            className="flex w-full items-center justify-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3.5 text-sm font-medium text-stone-900 shadow-sm transition hover:border-stone-300 hover:bg-stone-50"
+          >
+            <Plane className="h-5 w-5 text-stone-600" strokeWidth={2} aria-hidden />
+            Sign in with Google
+          </button>
+
+          {/* Divider */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center" aria-hidden>
+              <div className="w-full border-t border-stone-200" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-white px-3 text-xs font-medium uppercase tracking-wider text-stone-400">
+                OR
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleAuthSubmit} className="space-y-4">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
+              Email
+            </span>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              required
+              autoComplete="email"
+              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
+              Password
+            </span>
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              required
+              autoComplete={authMode === "signin" ? "current-password" : "new-password"}
+              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            />
+          </label>
+          {authError && (
+            <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+              {authError}
+            </p>
+          )}
+          <div className="flex flex-col gap-3 pt-2">
+            <button
+              type="submit"
+              className="w-full rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800"
+            >
+              {authMode === "signin" ? "Sign In" : "Sign Up"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+              className="text-sm text-stone-500 underline decoration-stone-300 underline-offset-2 hover:text-stone-700"
+            >
+              {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 
   // ——— Dashboard View ———
   if (viewMode === "dashboard") {
     return (
       <div className="min-h-screen bg-[#f8f8f6] text-stone-900 antialiased">
+        {authModal}
         {topNav}
         <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
           <div className="mb-8">
@@ -566,7 +933,7 @@ export default function Home() {
               <p className="text-stone-600">No saved trips yet.</p>
               <button
                 type="button"
-                onClick={() => setViewMode("wizard")}
+                onClick={handleNewTrip}
                 className="mt-4 inline-flex rounded-full bg-stone-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-stone-800"
               >
                 Plan a trip
@@ -633,6 +1000,7 @@ export default function Home() {
   if (viewMode === "builder") {
     return (
       <div className="min-h-screen bg-[#f5f4f1] text-stone-900 antialiased">
+        {authModal}
         {topNav}
         <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
           <header className="mb-6 flex items-center justify-between">
@@ -656,6 +1024,7 @@ export default function Home() {
                 setViewMode("wizard");
                 setItineraryBlocks([]);
                 setCurrentTripId(null);
+                setTripStatus("draft");
               }}
               className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-600 shadow-sm transition hover:bg-stone-50"
             >
@@ -663,7 +1032,7 @@ export default function Home() {
             </button>
           </header>
 
-          {/* Sticky workspace header: trip name + save (below global nav h-14) */}
+          {/* Sticky workspace header: trip name + concierge CTA + save (below global nav h-14) */}
           <div className="sticky top-14 z-10 -mx-4 mb-6 border-b border-stone-200/80 bg-[#f5f4f1]/95 px-4 py-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <label className="min-w-0 flex-1">
@@ -678,34 +1047,112 @@ export default function Home() {
                   className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-base font-medium text-stone-900 shadow-sm placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
                 />
               </label>
-              <button
-                type="button"
-                onClick={() => void handleSaveTrip()}
-                disabled={isSaving}
-                className={`shrink-0 rounded-xl px-6 py-3 text-base font-semibold shadow-lg shadow-stone-900/15 transition active:scale-[0.98] ${
-                  isSaving
-                    ? "cursor-wait bg-stone-600 text-white"
-                    : saveJustSucceeded
-                      ? "bg-emerald-600 text-white hover:bg-emerald-600"
-                      : "bg-stone-900 text-white hover:bg-stone-800"
-                } disabled:opacity-90`}
-              >
-                <span className="inline-flex items-center justify-center gap-2">
-                  {isSaving && (
-                    <Loader2
-                      className="h-5 w-5 shrink-0 animate-spin"
-                      aria-hidden
-                    />
-                  )}
-                  {isSaving
-                    ? "Saving…"
-                    : saveJustSucceeded
-                      ? "Saved!"
-                      : "Save Trip"}
-                </span>
-              </button>
+              <div className="flex shrink-0 flex-col items-end gap-2">
+                {tripStatus === "draft" && (
+                  <button
+                    type="button"
+                    onClick={() => setShowRequestBookingModal(true)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-3 text-base font-semibold text-white shadow-lg shadow-amber-500/25 transition hover:bg-amber-600 active:scale-[0.98]"
+                  >
+                    <Bell className="h-5 w-5" strokeWidth={2} aria-hidden />
+                    Request VIP Booking
+                  </button>
+                )}
+                {tripStatus === "quote_requested" && (
+                  <span className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-500">
+                    <Sparkles className="h-4 w-4 text-stone-400" strokeWidth={1.5} aria-hidden />
+                    Quote Requested — Advisor Reviewing
+                  </span>
+                )}
+                {tripStatus === "booked" && (
+                  <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+                    <CheckCircle className="h-4 w-4 text-emerald-600" strokeWidth={2} aria-hidden />
+                    Trip Confirmed
+                  </span>
+                )}
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveTrip()}
+                    disabled={isSaving}
+                    className={`rounded-xl px-6 py-3 text-base font-semibold shadow-lg shadow-stone-900/15 transition active:scale-[0.98] ${
+                      isSaving
+                        ? "cursor-wait bg-stone-600 text-white"
+                        : saveJustSucceeded
+                          ? "bg-emerald-600 text-white hover:bg-emerald-600"
+                          : "bg-stone-900 text-white hover:bg-stone-800"
+                    } disabled:opacity-90`}
+                  >
+                    <span className="inline-flex items-center justify-center gap-2">
+                      {isSaving && (
+                        <Loader2
+                          className="h-5 w-5 shrink-0 animate-spin"
+                          aria-hidden
+                        />
+                      )}
+                      {isSaving
+                        ? "Saving…"
+                        : saveJustSucceeded
+                          ? "Saved!"
+                          : "Save Trip"}
+                    </span>
+                  </button>
+                  <p className="text-xs text-gray-500">Un-bookmarked items will be deleted when you save.</p>
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* Request VIP Booking modal */}
+          {showRequestBookingModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm"
+              aria-modal="true"
+              role="dialog"
+              aria-labelledby="request-booking-modal-title"
+            >
+              <div className="relative w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => setShowRequestBookingModal(false)}
+                  className="absolute right-4 top-4 rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" strokeWidth={2} />
+                </button>
+                <div className="flex items-center gap-3 text-amber-600">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+                    <Bell className="h-5 w-5" strokeWidth={2} />
+                  </div>
+                  <h2 id="request-booking-modal-title" className="text-xl font-semibold text-stone-900">
+                    Submit Booking Request?
+                  </h2>
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-stone-600">
+                  Our human advisors will review your itinerary, secure VIP perks (like room upgrades), and send you a soft quote. No credit card required.
+                </p>
+                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 ring-1 ring-amber-200/80">
+                  Note: Only the items you have bookmarked will be submitted for booking.
+                </p>
+                <div className="mt-6 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleRequestBooking()}
+                    className="w-full rounded-xl bg-amber-500 py-3 text-base font-semibold text-white shadow-lg shadow-amber-500/25 transition hover:bg-amber-600"
+                  >
+                    Confirm Request
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowRequestBookingModal(false)}
+                    className="w-full rounded-xl border border-stone-200 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="itinerary-list">
@@ -777,12 +1224,43 @@ export default function Home() {
                                 >
                                   {block.type}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateBlock(block.id, {
+                                      isBooked: !block.isBooked,
+                                    })
+                                  }
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
+                                    block.isBooked
+                                      ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+                                      : "bg-stone-50 text-stone-600 ring-stone-200 hover:bg-stone-100"
+                                  }`}
+                                  aria-pressed={block.isBooked}
+                                >
+                                  <CheckCircle
+                                    className={`h-3.5 w-3.5 ${block.isBooked ? "text-emerald-600" : "text-stone-400"}`}
+                                    strokeWidth={2}
+                                    aria-hidden
+                                  />
+                                  Mark as Booked
+                                </button>
                               </div>
                               <input
                                 type="text"
-                                value={block.title}
+                                value={
+                                  block.isBooked
+                                    ? (block.bookedName ?? block.title)
+                                    : block.title
+                                }
                                 onChange={(e) =>
-                                  updateBlock(block.id, { title: e.target.value })
+                                  block.isBooked
+                                    ? updateBlock(block.id, {
+                                        bookedName: e.target.value,
+                                      })
+                                    : updateBlock(block.id, {
+                                        title: e.target.value,
+                                      })
                                 }
                                 className="w-full border-0 bg-transparent text-lg font-semibold tracking-tight text-stone-900 placeholder:text-stone-300 focus:outline-none focus:ring-0"
                                 placeholder="Title"
@@ -798,6 +1276,122 @@ export default function Home() {
                                 className="w-full resize-y rounded-xl border border-stone-100 bg-stone-50/50 px-3 py-2 text-sm leading-relaxed text-stone-600 placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-200"
                                 placeholder="Description"
                               />
+                              {block.isBooked && (
+                                <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                                    Confirmed Reservation Details
+                                  </span>
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    <label className="sm:col-span-2">
+                                      <span className="mb-1 block text-xs font-medium text-stone-500">
+                                        Name (as booked)
+                                      </span>
+                                      <input
+                                        type="text"
+                                        value={block.bookedName ?? ""}
+                                        onChange={(e) =>
+                                          updateBlock(block.id, {
+                                            bookedName: e.target.value,
+                                          })
+                                        }
+                                        placeholder={block.title || "Reservation name"}
+                                        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span className="mb-1 block text-xs font-medium text-stone-500">
+                                        Confirmation number
+                                      </span>
+                                      <input
+                                        type="text"
+                                        value={block.confirmationNumber ?? ""}
+                                        onChange={(e) =>
+                                          updateBlock(block.id, {
+                                            confirmationNumber: e.target.value,
+                                          })
+                                        }
+                                        placeholder="e.g. ABC123"
+                                        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                                      />
+                                    </label>
+                                    <label>
+                                      <span className="mb-1 block text-xs font-medium text-stone-500">
+                                        Cost
+                                      </span>
+                                      <input
+                                        type="text"
+                                        value={block.cost ?? ""}
+                                        onChange={(e) =>
+                                          updateBlock(block.id, {
+                                            cost: e.target.value,
+                                          })
+                                        }
+                                        placeholder="e.g. $299"
+                                        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                                      />
+                                    </label>
+                                    <label className="sm:col-span-2">
+                                      <span className="mb-1 block text-xs font-medium text-stone-500">
+                                        Booking URL
+                                      </span>
+                                      <input
+                                        type="url"
+                                        value={block.actualBookingUrl ?? ""}
+                                        onChange={(e) =>
+                                          updateBlock(block.id, {
+                                            actualBookingUrl: e.target.value,
+                                          })
+                                        }
+                                        placeholder="https://..."
+                                        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
+                              )}
+                              {block.bookingOptions && block.bookingOptions.length > 0 ? (
+                                <div className="space-y-2">
+                                  <span className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                                    Book with
+                                  </span>
+                                  <ul className="flex flex-col gap-2">
+                                    {block.bookingOptions.map((opt, i) => (
+                                      <li key={i}>
+                                        <a
+                                          href={opt.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-sm transition hover:border-stone-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-stone-300"
+                                        >
+                                          <span className="min-w-0 flex-1">
+                                            <span className="font-medium text-stone-900">
+                                              {opt.providerName}
+                                            </span>
+                                            <span className="mt-0.5 block text-sm text-stone-600">
+                                              {opt.why}
+                                            </span>
+                                          </span>
+                                          <ExternalLink className="h-4 w-4 shrink-0 text-stone-400" strokeWidth={1.5} />
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleFindBookings(block.id, block)}
+                                  disabled={bookingOptionsLoadingBlockId === block.id}
+                                  className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300 disabled:opacity-70"
+                                >
+                                  {bookingOptionsLoadingBlockId === block.id ? (
+                                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" strokeWidth={1.5} />
+                                  ) : (
+                                    <Sparkles className="h-4 w-4 shrink-0 text-amber-500" strokeWidth={1.5} />
+                                  )}
+                                  Find Bookings
+                                </button>
+                              )}
                               <div className="flex items-center gap-2">
                                 <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
                                   Type
@@ -817,14 +1411,33 @@ export default function Home() {
                                 </select>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => deleteBlock(block.id)}
-                              className="shrink-0 rounded-xl p-2 text-stone-400 transition hover:bg-red-50 hover:text-red-600"
-                              aria-label="Delete block"
-                            >
-                              <Trash2 className="h-5 w-5" strokeWidth={1.5} />
-                            </button>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleIncludeInItinerary(block.id)}
+                                className={`rounded-xl p-2 transition ${
+                                  block.isIncluded !== false
+                                    ? "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                                    : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                                }`}
+                                aria-label={block.isIncluded !== false ? "Included in itinerary" : "Include in itinerary"}
+                                aria-pressed={block.isIncluded !== false}
+                              >
+                                <Bookmark
+                                  className="h-5 w-5"
+                                  strokeWidth={block.isIncluded !== false ? 2.5 : 1.5}
+                                  fill={block.isIncluded !== false ? "currentColor" : "none"}
+                                />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteBlock(block.id)}
+                                className="rounded-xl p-2 text-stone-400 transition hover:bg-red-50 hover:text-red-600"
+                                aria-label="Delete block"
+                              >
+                                <Trash2 className="h-5 w-5" strokeWidth={1.5} />
+                              </button>
+                            </div>
                           </div>
                         </li>
                       )}
@@ -851,6 +1464,7 @@ export default function Home() {
   // ——— Wizard (multi-step form) ———
   return (
     <div className="min-h-screen bg-[#fafaf9] text-stone-900 antialiased">
+      {authModal}
       {topNav}
       <div className="flex min-h-screen flex-col pt-4">
 
