@@ -19,9 +19,9 @@ import {
   Bell,
   Bookmark,
   CheckCircle,
-  BadgeCheck,
   MessageSquare,
   Menu,
+  Crown,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -765,17 +765,20 @@ export default function Home() {
             Twizz
           </button>
           {isFounderVip === true && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-600 px-4 py-1.5 text-sm font-semibold text-white">
-              <BadgeCheck className="h-4 w-4 shrink-0" strokeWidth={2} />
-              Twizz Founder VIP
+            <span
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-600 text-white shadow-sm"
+              title="Twizz Founder VIP"
+              aria-label="Twizz Founder VIP"
+            >
+              <Crown className="h-4 w-4" strokeWidth={2} />
             </span>
           )}
         </div>
-        <nav className="relative flex items-center gap-2 sm:gap-3">
+        <nav className="relative flex items-center gap-2">
           {isFounderVip === true && (
             <Link
               href="/feedback"
-              className="inline-flex items-center gap-2 rounded-full border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-800 shadow-sm transition hover:bg-purple-100 hover:border-purple-300"
+              className="flex h-9 items-center justify-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm font-medium text-purple-800 shadow-sm transition hover:bg-purple-100 hover:border-purple-300"
             >
               <MessageSquare className="h-4 w-4 shrink-0" strokeWidth={2} />
               Beta Feedback
@@ -784,7 +787,7 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setIsMenuOpen((o) => !o)}
-            className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300"
+            className="flex h-9 items-center justify-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300"
             aria-expanded={isMenuOpen}
             aria-haspopup="true"
           >
