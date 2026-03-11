@@ -21,6 +21,7 @@ import {
   CheckCircle,
   BadgeCheck,
   MessageSquare,
+  Menu,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -193,6 +194,7 @@ export default function Home() {
   /** Twizz Founders VIP theme: true = purple background, false/null = default. */
   const [isFounderVip, setIsFounderVip] = useState<boolean | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -753,7 +755,7 @@ export default function Home() {
   // ——— Global top nav ———
   const topNav = (
     <header className="sticky top-0 z-30 border-b border-stone-200 bg-white">
-      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -769,7 +771,7 @@ export default function Home() {
             </span>
           )}
         </div>
-        <nav className="flex items-center gap-2 sm:gap-3">
+        <nav className="relative flex items-center gap-2 sm:gap-3">
           {isFounderVip === true && (
             <Link
               href="/feedback"
@@ -781,40 +783,76 @@ export default function Home() {
           )}
           <button
             type="button"
-            onClick={handleNewTrip}
-            className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300"
+            onClick={() => setIsMenuOpen((o) => !o)}
+            className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300"
+            aria-expanded={isMenuOpen}
+            aria-haspopup="true"
           >
-            New Trip
+            <Menu className="h-4 w-4 shrink-0" strokeWidth={2} />
+            Menu
           </button>
-          {user ? (
+          {isMenuOpen && (
             <>
-              <button
-                type="button"
-                onClick={() => setViewMode("dashboard")}
-                className={`rounded-full px-4 py-2 text-sm font-medium shadow-sm transition ${
-                  viewMode === "dashboard"
-                    ? "bg-stone-900 text-white hover:bg-stone-800"
-                    : "border border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
-                }`}
+              <div
+                className="fixed inset-0 z-40"
+                aria-hidden="true"
+                onClick={() => setIsMenuOpen(false)}
+              />
+              <div
+                className="absolute right-0 top-full z-50 mt-2 w-48 rounded-md border border-stone-200 bg-white py-1 shadow-lg"
+                role="menu"
               >
-                My Trips
-              </button>
-              <button
-                type="button"
-                onClick={() => supabase?.auth.signOut()}
-                className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50"
-              >
-                Sign Out
-              </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    handleNewTrip();
+                    setIsMenuOpen(false);
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                >
+                  New Trip
+                </button>
+                {user ? (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setViewMode("dashboard");
+                        setIsMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                    >
+                      My Trips
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        supabase?.auth.signOut();
+                        setIsMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowAuthModal(true);
+                      setIsMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                  >
+                    Sign In
+                  </button>
+                )}
+              </div>
             </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowAuthModal(true)}
-              className="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-stone-800"
-            >
-              Sign In
-            </button>
           )}
         </nav>
       </div>
