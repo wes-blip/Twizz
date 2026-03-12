@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FeedbackForm } from "./FeedbackForm";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { ArrowLeft, Loader2 } from "lucide-react";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -86,12 +87,14 @@ export default function FeedbackPage() {
           Beta Feedback
         </h1>
         <p className="mt-2 text-stone-600">
-          Founders: share unfiltered feedback, bug reports, or feature ideas. We read everything.
+          Hi friends! Thanks for helping me build the app. I'll be reviewing your feedback and posting updates below so you can follow along for the adventure - Wes
         </p>
 
         <div className="mt-8 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
           <FeedbackForm supabase={supabase} />
         </div>
+
+        <ReleaseNotes />
       </main>
     </div>
   );
