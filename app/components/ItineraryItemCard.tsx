@@ -21,7 +21,10 @@ type BookingOption = {
 
 export type ItineraryBlock = {
   id: string;
+  /** YYYY-MM-DD (start/check-in for accommodation) */
   date: string;
+  /** YYYY-MM-DD optional end/check-out for accommodation */
+  endDate?: string;
   location: string;
   type: "accommodation" | "activity" | "logistics";
   title: string;
@@ -37,29 +40,32 @@ export type ItineraryBlock = {
 
 type ItineraryItemCardProps = {
   block: ItineraryBlock;
-  dragHandleProps: React.HTMLAttributes<HTMLDivElement> | null;
-  dragInnerRef: (el: HTMLElement | null) => void;
-  dragDraggableProps: object;
-  snapshot: { isDragging: boolean };
-  updateBlock: (id: string, patch: Partial<ItineraryBlock>) => void;
-  deleteBlock: (id: string) => void;
-  toggleIncludeInItinerary: (blockId: string) => void;
-  handleFindBookings: (blockId: string, blockData: ItineraryBlock) => void;
-  bookingOptionsLoadingBlockId: string | null;
+  /** When true, only the front (read-only) content is shown; no drag/edit/bookmark. */
+  readOnly?: boolean;
+  dragHandleProps?: React.HTMLAttributes<HTMLDivElement> | null;
+  dragInnerRef?: (el: HTMLElement | null) => void;
+  dragDraggableProps?: object;
+  snapshot?: { isDragging: boolean };
+  updateBlock?: (id: string, patch: Partial<ItineraryBlock>) => void;
+  deleteBlock?: (id: string) => void;
+  toggleIncludeInItinerary?: (blockId: string) => void;
+  handleFindBookings?: (blockId: string, blockData: ItineraryBlock) => void;
+  bookingOptionsLoadingBlockId?: string | null;
   typeBadgeClass: (type: ItineraryBlock["type"]) => string;
 };
 
 export function ItineraryItemCard({
   block,
-  dragHandleProps,
+  readOnly = false,
+  dragHandleProps = null,
   dragInnerRef,
-  dragDraggableProps,
-  snapshot,
+  dragDraggableProps = {},
+  snapshot = { isDragging: false },
   updateBlock,
   deleteBlock,
   toggleIncludeInItinerary,
   handleFindBookings,
-  bookingOptionsLoadingBlockId,
+  bookingOptionsLoadingBlockId = null,
   typeBadgeClass,
 }: ItineraryItemCardProps) {
   const [isFlipped, setIsFlipped] = useState(false);
@@ -69,6 +75,38 @@ export function ItineraryItemCard({
     // Front label (e.g. type) reads from block props so it updates immediately.
     setIsFlipped(false);
   };
+
+  if (readOnly) {
+    return (
+      <div className="rounded-xl border border-stone-200/80 bg-white p-4 shadow-sm ring-1 ring-black/[0.03]">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-stone-500">
+            {block.endDate ? `${block.date} – ${block.endDate}` : block.date}
+          </span>
+          <span className="min-w-0 truncate text-sm text-stone-600">{block.location}</span>
+          <span
+            className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ring-1 ring-inset ${typeBadgeClass(block.type)}`}
+          >
+            {block.type}
+          </span>
+        </div>
+        <h3 className="mt-2 line-clamp-2 min-w-0 text-base font-semibold tracking-tight text-stone-900">
+          {block.isBooked ? (block.bookedName ?? block.title) : block.title || "Untitled"}
+        </h3>
+        {block.description ? (
+          <p className="mt-1 line-clamp-2 min-w-0 text-sm leading-relaxed text-stone-600">
+            {block.description}
+          </p>
+        ) : null}
+        {block.isBooked && (
+          <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+            <CheckCircle className="h-3.5 w-3.5" strokeWidth={2} />
+            Booked
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <li
@@ -97,7 +135,9 @@ export function ItineraryItemCard({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-stone-500">{block.date}</span>
+                    <span className="text-sm text-stone-500">
+                      {block.endDate ? `${block.date} – ${block.endDate}` : block.date}
+                    </span>
                     <span className="text-stone-300">·</span>
                     <span className="min-w-0 truncate text-sm text-stone-600">{block.location}</span>
                   </div>
@@ -186,17 +226,45 @@ export function ItineraryItemCard({
             >
               <div className="space-y-3 p-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                      Date
-                    </label>
-                    <input
-                      type="date"
-                      value={block.date}
-                      onChange={(e) => updateBlock(block.id, { date: e.target.value })}
-                      className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                    />
-                  </div>
+                  {block.type === "accommodation" ? (
+                    <>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                          Check-in
+                        </label>
+                        <input
+                          type="date"
+                          value={block.date}
+                          onChange={(e) => updateBlock(block.id, { date: e.target.value })}
+                          className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                        />
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                          Check-out
+                        </label>
+                        <input
+                          type="date"
+                          value={block.endDate ?? ""}
+                          onChange={(e) => updateBlock(block.id, { endDate: e.target.value || undefined })}
+                          min={block.date || undefined}
+                          className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        value={block.date}
+                        onChange={(e) => updateBlock(block.id, { date: e.target.value })}
+                        className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                      />
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1 sm:min-w-[12rem]">
                     <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
                       Location

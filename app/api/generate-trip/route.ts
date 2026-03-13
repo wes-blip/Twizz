@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 type FormDataPayload = {
   destination: string;
   startDate: string;
-  nights: number;
+  endDate: string;
   people: number;
   vibe: string;
 };
@@ -16,6 +16,8 @@ type ItineraryBlock = {
   id?: string;
   /** YYYY-MM-DD based on trip start date */
   date: string;
+  /** YYYY-MM-DD optional check-out for accommodation */
+  endDate?: string;
   /** City or area for this leg */
   location: string;
   type: "accommodation" | "activity" | "logistics";
@@ -70,8 +72,10 @@ function parseJsonFromGemini(text: string): { itineraryBlocks: ItineraryBlock[] 
   // Normalize each block to ensure required fields exist as strings
   const itineraryBlocks: ItineraryBlock[] = blocks.map((b: unknown) => {
     const block = b as Record<string, unknown>;
+    const endDate = typeof block.endDate === "string" ? block.endDate.trim() : undefined;
     return {
       date: typeof block.date === "string" ? block.date : "",
+      ...(endDate ? { endDate } : {}),
       location: typeof block.location === "string" ? block.location : "",
       type:
         block.type === "accommodation" || block.type === "logistics"
@@ -96,7 +100,7 @@ STRICT RULE — Activity count: You must generate a minimum of 3 and a strict ma
 STRICT RULE — Accommodation (Fora Partner / luxury consortium): When recommending accommodations, you MUST prioritize properties that are part of luxury travel advisor networks (e.g., Virtuoso, Four Seasons Preferred, Rosewood Elite, Belmond Bellini, Hyatt Privé, Marriott Stars) or highly-rated independent boutique hotels. The user acts as a VIP travel advisor, so these specific partner properties are strictly preferred over generic chain hotels or budget options. For every accommodation block, ensure the title explicitly mentions the specific hotel name (e.g., "Four Seasons Resort Maui at Wailea" not "Luxury resort in Maui").
 
 Each element of itineraryBlocks must be an object with:
-- "date": string in YYYY-MM-DD format. Compute each block's date from the trip's startDate in the user message; assign blocks to calendar days in order so the itinerary is date-specific and multi-leg aware.
+- "date": string in YYYY-MM-DD format. Compute each block's date from the trip's startDate to endDate in the user message; assign blocks to calendar days in order so the itinerary is date-specific and multi-leg aware. For accommodation blocks, you may include an "endDate" (YYYY-MM-DD) for check-out when the stay spans multiple days.
 - "location": string — city or area where this block takes place (may repeat or change per leg).
 - "type": one of "accommodation", "activity", "logistics"
 - "title": short, compelling title for the block. For accommodation blocks, the title MUST include the specific hotel/property name.
@@ -119,7 +123,7 @@ export async function POST(request: Request) {
     formData = {
       destination: String(body.destination ?? ""),
       startDate: String(body.startDate ?? ""),
-      nights: Number(body.nights) || 0,
+      endDate: String(body.endDate ?? ""),
       people: Number(body.people) || 0,
       vibe: String(body.vibe ?? ""),
     };
@@ -136,7 +140,7 @@ export async function POST(request: Request) {
   const userPrompt = `Plan a trip with these details (use them to shape the itinerary and accommodation suggestions):
 ${JSON.stringify(formData, null, 2)}
 
-Return only the JSON object with itineraryBlocks as specified. Each block must have date (YYYY-MM-DD from startDate onward), location, type, title, and description.`;
+Return only the JSON object with itineraryBlocks as specified. Each block must have date (YYYY-MM-DD from startDate to endDate), location, type, title, and description. Accommodation blocks may include endDate for check-out.`;
 
   try {
     const result = await model.generateContent({

@@ -22,6 +22,8 @@ import {
   MessageSquare,
   Menu,
   Crown,
+  Layers,
+  CalendarDays,
 } from "lucide-react";
 import {
   DragDropContext,
@@ -35,8 +37,9 @@ import { v4 as uuidv4 } from "uuid";
 type FormData = {
   destination: string;
   startDate: string;
-  nights: number;
-  people: number;
+  endDate: string;
+  /** Number of travelers; may be empty string while user is typing */
+  people: number | string;
   vibe: string;
 };
 
@@ -48,8 +51,10 @@ type BookingOption = {
 
 type ItineraryBlock = {
   id: string;
-  /** YYYY-MM-DD */
+  /** YYYY-MM-DD (start/check-in for accommodation) */
   date: string;
+  /** YYYY-MM-DD optional end/check-out for accommodation or multi-day items */
+  endDate?: string;
   /** City or area */
   location: string;
   type: "accommodation" | "activity" | "logistics";
@@ -66,10 +71,26 @@ type ItineraryBlock = {
   isIncluded?: boolean;
 };
 
+/** Timeline entry: either a real block or a synthetic "check-out" marker for multi-day items. */
+export type TimelineEntry =
+  | ItineraryBlock
+  | { kind: "checkout"; sourceBlock: ItineraryBlock };
+
+/** Trip row from Supabase (trips table); blocks stored as JSON array in blocks field. */
+type Trip = {
+  id?: string;
+  name: string;
+  blocks: ItineraryBlock[];
+  start_date: string;
+  end_date: string;
+  user_id?: string;
+  status?: string;
+};
+
 const initialFormData: FormData = {
   destination: "",
   startDate: "",
-  nights: 3,
+  endDate: "",
   people: 2,
   vibe: "",
 };
@@ -82,8 +103,10 @@ function isStep1Valid(data: FormData) {
 
 function isStep2Valid(data: FormData) {
   if (!data.startDate.trim()) return false;
-  if (!Number.isFinite(data.nights) || data.nights < 1) return false;
-  if (!Number.isFinite(data.people) || data.people < 1) return false;
+  if (!data.endDate.trim()) return false;
+  if (data.endDate < data.startDate) return false;
+  const n = Number(data.people);
+  if (!Number.isFinite(n) || n < 1) return false;
   return true;
 }
 
@@ -122,6 +145,89 @@ function formatCityLabel(r: GeocodingResult): string {
   return parts.join(", ");
 }
 
+/** Sort blocks by date and group by date for timeline view. Returns array of { date, dayLabel, dayIndex, blocks }. */
+function groupBlocksByDate(blocks: ItineraryBlock[]): {
+  date: string;
+  dayLabel: string;
+  dayIndex: number;
+  blocks: ItineraryBlock[];
+}[] {
+  const sorted = [...blocks].sort((a, b) => {
+    const dA = a.date || "";
+    const dB = b.date || "";
+    return dA.localeCompare(dB);
+  });
+  const byDate = new Map<string, ItineraryBlock[]>();
+  for (const block of sorted) {
+    const d = block.date || "";
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d)!.push(block);
+  }
+  const dates = Array.from(byDate.keys()).filter(Boolean).sort();
+  return dates.map((date, i) => {
+    let dayLabel = date;
+    try {
+      const parsed = new Date(date + "T12:00:00");
+      if (!Number.isNaN(parsed.getTime())) {
+        dayLabel = parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      }
+    } catch {
+      // keep YYYY-MM-DD
+    }
+    return {
+      date,
+      dayLabel,
+      dayIndex: i + 1,
+      blocks: byDate.get(date) ?? [],
+    };
+  });
+}
+
+/** Multi-day blocks (have endDate and it differs from start date). */
+function getMultiDayBlocks(blocks: ItineraryBlock[]): ItineraryBlock[] {
+  return blocks.filter((b) => b.endDate && b.endDate !== (b.date || ""));
+}
+
+/** Group blocks for timeline view: injects synthetic "checkout" entries at the very top of end_date days so accommodations span visually. */
+function groupBlocksByDateForTimeline(blocks: ItineraryBlock[]): {
+  date: string;
+  dayLabel: string;
+  dayIndex: number;
+  blocks: TimelineEntry[];
+}[] {
+  const dateSet = new Set<string>();
+  for (const block of blocks) {
+    const d = block.date || "";
+    if (d) dateSet.add(d);
+    if (block.endDate && block.endDate !== d) dateSet.add(block.endDate);
+  }
+  const dates = Array.from(dateSet).filter(Boolean).sort();
+  return dates.map((date, i) => {
+    let dayLabel = date;
+    try {
+      const parsed = new Date(date + "T12:00:00");
+      if (!Number.isNaN(parsed.getTime())) {
+        dayLabel = parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      }
+    } catch {
+      // keep YYYY-MM-DD
+    }
+    const checkouts: TimelineEntry[] = blocks
+      .filter((b) => b.endDate && b.endDate !== (b.date || "") && b.endDate === date)
+      .map((b) => ({ kind: "checkout" as const, sourceBlock: b }));
+    const dayBlocks = blocks
+      .filter((b) => (b.date || "") === date)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const entries: TimelineEntry[] = [...checkouts, ...dayBlocks];
+    return {
+      date,
+      dayLabel,
+      dayIndex: i + 1,
+      blocks: entries,
+    };
+  });
+}
+
 function parseTripResponse(data: unknown): ItineraryBlock[] {
   if (Array.isArray(data)) {
     return data.map((b) => {
@@ -134,9 +240,11 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
               typeof o?.why === "string"
           )
         : undefined;
+      const endDateRaw = String((block as { endDate?: string }).endDate ?? (block as { checkOutDate?: string }).checkOutDate ?? "").trim() || undefined;
       return {
         id: String(block.id ?? uuidv4()),
         date: String(block.date ?? ""),
+        ...(endDateRaw ? { endDate: endDateRaw } : {}),
         location: String(block.location ?? ""),
         type:
           block.type === "accommodation" || block.type === "logistics"
@@ -173,6 +281,8 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<"wizard" | "builder" | "dashboard">(
     "wizard"
   );
+  /** Within trip/itinerary page: builder (edit), timeline (read-only), or map placeholder */
+  const [activeView, setActiveView] = useState<"builder" | "timeline" | "map">("builder");
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [itineraryBlocks, setItineraryBlocks] = useState<ItineraryBlock[]>([]);
@@ -206,6 +316,14 @@ export default function Home() {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
+
+  /** Timeline: refs and measured positions for multi-day connector lines (check-in → check-out). */
+  const timelineContainerRef = useRef<HTMLDivElement>(null);
+  const timelineLineStartRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const timelineLineEndRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [timelineLinePositions, setTimelineLinePositions] = useState<
+    Record<string, { top: number; height: number }>
+  >({});
 
   const fetchSuggestions = useCallback(async (query: string) => {
     const q = query.trim();
@@ -304,6 +422,43 @@ export default function Home() {
     };
   }, [user, supabase]);
 
+  // Measure timeline connector lines when timeline view is active and multi-day blocks exist.
+  useEffect(() => {
+    if (activeView !== "timeline") {
+      setTimelineLinePositions({});
+      timelineLineStartRefs.current = {};
+      timelineLineEndRefs.current = {};
+      return;
+    }
+    const multiDay = getMultiDayBlocks(itineraryBlocks);
+    if (multiDay.length === 0) {
+      setTimelineLinePositions({});
+      return;
+    }
+    const container = timelineContainerRef.current;
+    if (!container) return;
+    const raf = requestAnimationFrame(() => {
+      const containerRect = container.getBoundingClientRect();
+      const next: Record<string, { top: number; height: number }> = {};
+      for (const block of multiDay) {
+        const startEl = timelineLineStartRefs.current[block.id];
+        const endEl = timelineLineEndRefs.current[block.id];
+        if (!startEl || !endEl) continue;
+        const startRect = startEl.getBoundingClientRect();
+        const endRect = endEl.getBoundingClientRect();
+        const startCenter = startRect.top + startRect.height / 2;
+        const endCenter = endRect.top + endRect.height / 2;
+        const top = startCenter - containerRect.top + container.scrollTop;
+        const height = endCenter - startCenter;
+        if (height > 0) next[block.id] = { top, height };
+      }
+      setTimelineLinePositions((prev) =>
+        Object.keys(next).length === 0 && Object.keys(prev).length === 0 ? prev : next
+      );
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeView, itineraryBlocks]);
+
   const selectDestination = useCallback((r: GeocodingResult) => {
     const label = formatCityLabel(r);
     setFormData((prev) => ({ ...prev, destination: label }));
@@ -331,13 +486,18 @@ export default function Home() {
 
   const handleBuildItinerary = async () => {
     if (!step3Valid) return;
+    const peopleNum = Number(formData.people);
+    if (!Number.isFinite(peopleNum) || peopleNum < 1) {
+      setGenerateError("Please enter a valid number of travelers (at least 1).");
+      return;
+    }
     setGenerateError(null);
     setGenerating(true);
     try {
       const res = await fetch("/api/generate-trip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, people: peopleNum }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -467,7 +627,7 @@ export default function Home() {
       if (!currentTripId) {
         const { data, error } = await supabase
           .from("trips")
-          .insert({ name, blocks: blocksToSave, user_id: user.id, status: "draft" })
+          .insert({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id, status: "draft" })
           .select("id")
           .single();
         if (error) throw error;
@@ -476,7 +636,7 @@ export default function Home() {
       } else {
         const { error } = await supabase
           .from("trips")
-          .update({ name, blocks: blocksToSave, user_id: user.id })
+          .update({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id })
           .eq("id", currentTripId);
         if (error) throw error;
       }
@@ -518,7 +678,7 @@ export default function Home() {
       if (currentTripId == null) {
         const { data, error } = await supabase
           .from("trips")
-          .insert({ name, blocks: blocksToSave, user_id: user.id, status: "quote_requested" })
+          .insert({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id, status: "quote_requested" })
           .select("id")
           .single();
         if (error) throw error;
@@ -529,7 +689,7 @@ export default function Home() {
       } else {
         const { error } = await supabase
           .from("trips")
-          .update({ name, blocks: blocksToSave, status: "quote_requested" })
+          .update({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, status: "quote_requested" })
           .eq("id", currentTripId);
         if (error) throw error;
         setTripStatus("quote_requested");
@@ -575,6 +735,18 @@ export default function Home() {
     }
   };
 
+  /** Timeline blurbs: compact pill colors by type (no labels). */
+  const timelineBlurbClass = (type: ItineraryBlock["type"]) => {
+    switch (type) {
+      case "accommodation":
+        return "bg-green-50 text-green-800 border-green-200";
+      case "logistics":
+        return "bg-blue-50 text-blue-800 border-blue-200";
+      default:
+        return "bg-orange-50 text-orange-800 border-orange-200";
+    }
+  };
+
   // ——— Load saved trip into builder ———
   const [loadTripError, setLoadTripError] = useState<string | null>(null);
   const [loadingTripId, setLoadingTripId] = useState<string | null>(null);
@@ -591,7 +763,7 @@ export default function Home() {
     try {
       const { data, error } = await supabase
         .from("trips")
-        .select("name, blocks, status")
+        .select("name, blocks, status, start_date, end_date")
         .eq("id", id)
         .single();
       if (error) throw error;
@@ -602,17 +774,23 @@ export default function Home() {
         isIncluded: true,
       }));
       const status = (data as { status?: string }).status;
+      const startDate = String((data as { start_date?: string }).start_date ?? "").trim();
+      const endDate = String((data as { end_date?: string }).end_date ?? "").trim();
       setCurrentTripId(id);
       setTripName(name);
       setItineraryBlocks(blocks);
       setTripStatus(
         status === "quote_requested" || status === "booked" ? status : "draft"
       );
-      // Restore destination label in header when possible from first block
+      // Restore form data for header (destination, dates) — always set from loaded trip so header updates when switching trips
       const firstLoc = blocks[0]?.location?.trim();
-      if (firstLoc && !formData.destination.trim()) {
-        setFormData((prev) => ({ ...prev, destination: firstLoc }));
-      }
+      const headerDestination = firstLoc || name || undefined;
+      setFormData((prev) => ({
+        ...prev,
+        ...(headerDestination ? { destination: headerDestination } : {}),
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      }));
       setViewMode("builder");
     } catch (e) {
       console.error(e);
@@ -1108,8 +1286,9 @@ export default function Home() {
               </h1>
               {formData.startDate && (
                 <p className="mt-1 text-sm text-stone-500">
-                  {formData.startDate} · {formData.nights} nights · {formData.people}{" "}
-                  {formData.people === 1 ? "guest" : "guests"}
+                  {formData.startDate} – {formData.endDate} ·{" "}
+                  {Number(formData.people) >= 1 ? Number(formData.people) : "—"}{" "}
+                  {Number(formData.people) === 1 ? "guest" : "guests"}
                 </p>
               )}
             </div>
@@ -1249,50 +1428,205 @@ export default function Home() {
             </div>
           )}
 
-          <DragDropContext onDragEnd={onDragEnd}>
-            <Droppable droppableId="itinerary-list">
-              {(provided) => (
-                <ul
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className="space-y-4"
+          {/* View mode tabs: Builder | Timeline | Map */}
+          <div className="mb-6">
+            <nav
+              className="flex rounded-full border border-stone-200 bg-white p-1 shadow-sm"
+              aria-label="Itinerary view"
+            >
+              {(
+                [
+                  { id: "builder" as const, label: "Builder", icon: Layers },
+                  { id: "timeline" as const, label: "Timeline", icon: CalendarDays },
+                  { id: "map" as const, label: "Map", icon: MapPin },
+                ] as const
+              ).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveView(id)}
+                  className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition sm:flex-initial ${
+                    activeView === id
+                      ? "bg-stone-900 text-white shadow-sm"
+                      : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+                  }`}
+                  aria-current={activeView === id ? "true" : undefined}
                 >
-                  {itineraryBlocks.map((block, index) => (
-                    <Draggable
-                      key={block.id}
-                      draggableId={block.id}
-                      index={index}
-                    >
-                      {(dragProvided, snapshot) => (
-                        <ItineraryItemCard
-                          block={block}
-                          dragHandleProps={dragProvided.dragHandleProps}
-                          dragInnerRef={dragProvided.innerRef}
-                          dragDraggableProps={dragProvided.draggableProps}
-                          snapshot={snapshot}
-                          updateBlock={updateBlock}
-                          deleteBlock={deleteBlock}
-                          toggleIncludeInItinerary={toggleIncludeInItinerary}
-                          handleFindBookings={handleFindBookings}
-                          bookingOptionsLoadingBlockId={bookingOptionsLoadingBlockId}
-                          typeBadgeClass={typeBadgeClass}
-                        />
-                      )}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
-                </ul>
-              )}
-            </Droppable>
-          </DragDropContext>
+                  <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} />
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </div>
 
-          <button
-            type="button"
-            onClick={addCustomBlock}
-            className="mt-6 w-full rounded-2xl border border-dashed border-stone-300 bg-white/60 py-4 text-sm font-medium text-stone-600 shadow-sm transition hover:border-stone-400 hover:bg-white hover:text-stone-900"
-          >
-            + Add custom block
-          </button>
+          {activeView === "builder" && (
+            <>
+              <DragDropContext onDragEnd={onDragEnd}>
+                <Droppable droppableId="itinerary-list">
+                  {(provided) => (
+                    <ul
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className="space-y-4"
+                    >
+                      {itineraryBlocks.map((block, index) => (
+                        <Draggable
+                          key={block.id}
+                          draggableId={block.id}
+                          index={index}
+                        >
+                          {(dragProvided, snapshot) => (
+                            <ItineraryItemCard
+                              block={block}
+                              dragHandleProps={dragProvided.dragHandleProps}
+                              dragInnerRef={dragProvided.innerRef}
+                              dragDraggableProps={dragProvided.draggableProps}
+                              snapshot={snapshot}
+                              updateBlock={updateBlock}
+                              deleteBlock={deleteBlock}
+                              toggleIncludeInItinerary={toggleIncludeInItinerary}
+                              handleFindBookings={handleFindBookings}
+                              bookingOptionsLoadingBlockId={bookingOptionsLoadingBlockId}
+                              typeBadgeClass={typeBadgeClass}
+                            />
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </ul>
+                  )}
+                </Droppable>
+              </DragDropContext>
+
+              <button
+                type="button"
+                onClick={addCustomBlock}
+                className="mt-6 w-full rounded-2xl border border-dashed border-stone-300 bg-white/60 py-4 text-sm font-medium text-stone-600 shadow-sm transition hover:border-stone-400 hover:bg-white hover:text-stone-900"
+              >
+                + Add custom block
+              </button>
+            </>
+          )}
+
+          {activeView === "map" && (
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-stone-200 bg-white/80 py-16 text-center shadow-sm">
+              <p className="text-lg font-medium text-stone-500">Map View Coming Soon</p>
+            </div>
+          )}
+
+          {activeView === "timeline" && (
+            <div
+              ref={timelineContainerRef}
+              className="relative border-l-2 border-stone-200 pl-8"
+            >
+              {groupBlocksByDateForTimeline(itineraryBlocks).length === 0 ? (
+                <div className="py-12 text-center text-sm text-stone-500">
+                  Add items with dates in Builder to see your timeline.
+                </div>
+              ) : (
+                <>
+                  {/* Green connector lines: check-in dot → check-out dot (behind content) */}
+                  {getMultiDayBlocks(itineraryBlocks).map((block) => {
+                    const pos = timelineLinePositions[block.id];
+                    if (!pos || pos.height <= 0) return null;
+                    return (
+                      <div
+                        key={`line-${block.id}`}
+                        className="pointer-events-none absolute left-0 w-0.5 rounded-full bg-green-400"
+                        style={{
+                          top: pos.top,
+                          height: pos.height,
+                          marginLeft: "-1px",
+                        }}
+                        aria-hidden
+                      />
+                    );
+                  })}
+                  {groupBlocksByDateForTimeline(itineraryBlocks).map((group) => (
+                    <div key={group.date} className="relative pb-10 last:pb-0">
+                      {/* Day header dot on track */}
+                      <div
+                        className="absolute -left-8 top-0.5 h-3 w-3 -translate-x-1/2 rounded-full border-2 border-white bg-stone-900 shadow-sm"
+                        aria-hidden
+                      />
+                      <h2 className="text-sm font-semibold uppercase tracking-wider text-stone-500">
+                        Day {group.dayIndex}: {group.dayLabel}
+                      </h2>
+                      <ul className="mt-4 space-y-3">
+                        {group.blocks.map((entry) => {
+                          const isCheckout =
+                            typeof entry === "object" &&
+                            "kind" in entry &&
+                            entry.kind === "checkout";
+                          if (isCheckout && "sourceBlock" in entry) {
+                            const source = entry.sourceBlock;
+                            const title =
+                              source.isBooked && source.bookedName
+                                ? source.bookedName
+                                : source.title || "Accommodation";
+                            return (
+                              <li
+                                key={`checkout-${source.id}`}
+                                className="relative flex items-center gap-3 pl-2"
+                              >
+                                {/* Dot on track (ref for green line end) */}
+                                <div
+                                  ref={(el) => {
+                                    timelineLineEndRefs.current[source.id] = el;
+                                  }}
+                                  className="absolute -left-8 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-white shadow-sm"
+                                  aria-hidden
+                                />
+                                <span
+                                  className={`inline-block w-fit max-w-md rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass("accommodation")}`}
+                                >
+                                  Check out: {title}
+                                </span>
+                              </li>
+                            );
+                          }
+                          const block = entry as ItineraryBlock;
+                          const isMultiDay =
+                            block.endDate && block.endDate !== (block.date || "");
+                          const displayName =
+                            block.isBooked && block.bookedName
+                              ? block.bookedName
+                              : block.title || "Untitled";
+                          const isAccommodation = block.type === "accommodation";
+                          const blurbLabel =
+                            isAccommodation && isMultiDay
+                              ? `Check in: ${displayName}`
+                              : displayName;
+                          return (
+                            <li key={block.id} className="relative flex items-center gap-3 pl-2">
+                              {/* Dot on track: ref for green line start when multi-day accommodation */}
+                              <div
+                                ref={(el) => {
+                                  if (isMultiDay)
+                                    timelineLineStartRefs.current[block.id] = el;
+                                }}
+                                className={`absolute -left-8 top-5 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-white shadow-sm ${
+                                  isMultiDay && isAccommodation
+                                    ? "bg-green-500"
+                                    : "bg-stone-400"
+                                }`}
+                                aria-hidden
+                              />
+                              <span
+                                className={`inline-block w-fit max-w-md rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass(block.type)}`}
+                              >
+                                {blurbLabel}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1446,50 +1780,46 @@ export default function Home() {
                   When and who?
                 </h1>
                 <div className="w-full space-y-10 text-left">
-                  <div>
-                    <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
-                      <Calendar className="h-4 w-4" strokeWidth={1.5} />
-                      Start date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.startDate}
-                      onChange={(e) => updateField("startDate", e.target.value)}
-                      required
-                      className={`w-full rounded-2xl border bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
-                        !formData.startDate.trim()
-                          ? "border-amber-200 focus:border-amber-400"
-                          : "border-stone-200 focus:border-stone-900"
-                      }`}
-                      aria-invalid={!formData.startDate.trim()}
-                    />
-                  </div>
                   <div className="grid gap-10 sm:grid-cols-2">
                     <div>
                       <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
                         <Calendar className="h-4 w-4" strokeWidth={1.5} />
-                        How many nights?
+                        Arrival date
                       </label>
                       <input
-                        type="number"
-                        min={1}
-                        max={60}
-                        value={formData.nights}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === "") return;
-                          const n = parseInt(v, 10);
-                          if (Number.isFinite(n))
-                            updateField("nights", Math.max(1, Math.min(60, n)));
-                        }}
-                        onBlur={(e) => {
-                          const n = parseInt(e.target.value, 10);
-                          if (!Number.isFinite(n) || n < 1)
-                            updateField("nights", initialFormData.nights);
-                        }}
-                        className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                        type="date"
+                        value={formData.startDate}
+                        onChange={(e) => updateField("startDate", e.target.value)}
+                        required
+                        className={`w-full rounded-2xl border bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
+                          !formData.startDate.trim()
+                            ? "border-amber-200 focus:border-amber-400"
+                            : "border-stone-200 focus:border-stone-900"
+                        }`}
+                        aria-invalid={!formData.startDate.trim()}
                       />
                     </div>
+                    <div>
+                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
+                        <Calendar className="h-4 w-4" strokeWidth={1.5} />
+                        Departure date
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.endDate}
+                        onChange={(e) => updateField("endDate", e.target.value)}
+                        min={formData.startDate || undefined}
+                        required
+                        className={`w-full rounded-2xl border bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
+                          !formData.endDate.trim() || formData.endDate < formData.startDate
+                            ? "border-amber-200 focus:border-amber-400"
+                            : "border-stone-200 focus:border-stone-900"
+                        }`}
+                        aria-invalid={!formData.endDate.trim() || formData.endDate < formData.startDate}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-10 sm:grid-cols-2">
                     <div>
                       <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
                         <Users className="h-4 w-4" strokeWidth={1.5} />
@@ -1499,27 +1829,18 @@ export default function Home() {
                         type="number"
                         min={1}
                         max={50}
-                        value={formData.people}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === "") return;
-                          const n = parseInt(v, 10);
-                          if (Number.isFinite(n))
-                            updateField("people", Math.max(1, Math.min(50, n)));
-                        }}
-                        onBlur={(e) => {
-                          const n = parseInt(e.target.value, 10);
-                          if (!Number.isFinite(n) || n < 1)
-                            updateField("people", initialFormData.people);
-                        }}
-                        className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={formData.people === "" ? "" : String(formData.people)}
+                        onChange={(e) => updateField("people", e.target.value)}
+                        className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     </div>
                   </div>
                 </div>
                 {!step2Valid && (
                   <p className="mt-8 text-center text-sm text-stone-400">
-                    Choose a start date to continue.
+                    Choose arrival and departure dates to continue.
                   </p>
                 )}
               </div>
