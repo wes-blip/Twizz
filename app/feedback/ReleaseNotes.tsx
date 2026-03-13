@@ -14,9 +14,26 @@ export type ReleaseItem = {
 
 const releases: ReleaseItem[] = [
   {
-    version: "Chapter 1",
+    version: "Chapter 1.1",
+    date: "3/13/2026",
+    title: "I love your feedback, keep it coming",
+    founderNotes: [
+      "Hello Twizzlers!",
+      "I'm gonna try to do these updates frequently so I'll keep them shorter. First off, thanks for all the feedback! I got like 7 (useful) comments in a day. The award for most requested change goes to \"Why can't you make the number of nights and number of people work? Are you stupid?\"",
+      "Thank you to all 4 of you who gave this feedback. You are the loud majority and I'm happy to announce that the bug has been fixed. We actually removed the number of nights function entirely. Now you get a start date and an end date for your arrival and departure! As for the number of people, you can just type in a number now - you're welcome. In my old supply chain job, my boss would've said \"glad we fixed it but what was the root cause?\" To which I would say, \"great question but i don't work for you anymore\"",
+      "But in all seriousness the root cause for both those fields is that my little ai agent buddy that's helping me build this thought it would be a good idea for those number fields to be operated by a little dropdown instead of typing. Unfortunately on mobile the dropdown piece was invisible. I met with the ai agent that designed this and he has been warned that if he screws up like this again he will be gone - as he is totally replaceable with other ai agents.",
+      "The second fix in this version was not a bug fix but a feature implementation. You will now see a timeline and map view. The timeline view is pretty self explanatory, but i simplified the view to ultimately function as a trip summary. Now the the 3 sections once you create a trip are builder (our og view), timeline (which is up and working), and map (which i'll build in the next couple of days hopefully).",
+      "Other bigger things on deck are the fact that I want this to turn into a booking engine to truly be a powerful tool. This would incorporate not only a trip budget function but my north star is actually booking a full trip in the app. It's a tall order for someone with no app building experience but luckily my army of ai minions has not failed me thus far. Also for the record, the ai minions just help me build the site. The decision making and the writing of these updates will always be controlled by me.",
+      "Go check out the new features, create a new test trip, and please keep the ideas coming!",
+      "Wes",
+    ],
+    features: [],
+    bugFixes: [],
+  },
+  {
+    version: "Chapter 1.0",
     date: "3/11/2026",
-    title: "Chapter 1",
+    title: "It's alive!",
     founderNotes: [
       "Hi!",
       "Welcome to my release notes for Twizz. You already know about Twizz because you wouldn't have been able to find this without me talking your ear off about it. That said, my hope is that the number of people reading this grows as my goal with these is to tell the story of Twizz as we build it!",
