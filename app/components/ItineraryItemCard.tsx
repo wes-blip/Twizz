@@ -235,7 +235,7 @@ export function ItineraryItemCard({
                         <input
                           type="date"
                           value={block.date}
-                          onChange={(e) => updateBlock(block.id, { date: e.target.value })}
+                          onChange={(e) => updateBlock?.(block.id, { date: e.target.value })}
                           className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
                         />
                       </div>
@@ -246,7 +246,7 @@ export function ItineraryItemCard({
                         <input
                           type="date"
                           value={block.endDate ?? ""}
-                          onChange={(e) => updateBlock(block.id, { endDate: e.target.value || undefined })}
+                          onChange={(e) => updateBlock?.(block.id, { endDate: e.target.value || undefined })}
                           min={block.date || undefined}
                           className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
                         />
@@ -260,7 +260,7 @@ export function ItineraryItemCard({
                       <input
                         type="date"
                         value={block.date}
-                        onChange={(e) => updateBlock(block.id, { date: e.target.value })}
+                        onChange={(e) => updateBlock?.(block.id, { date: e.target.value })}
                         className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
                       />
                     </div>
@@ -272,7 +272,7 @@ export function ItineraryItemCard({
                     <input
                       type="text"
                       value={block.location}
-                      onChange={(e) => updateBlock(block.id, { location: e.target.value })}
+                      onChange={(e) => updateBlock?.(block.id, { location: e.target.value })}
                       placeholder="City or area"
                       className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
                     />
@@ -285,7 +285,7 @@ export function ItineraryItemCard({
                   <select
                     value={block.type}
                     onChange={(e) =>
-                      updateBlock(block.id, {
+                      updateBlock?.(block.id, {
                         type: e.target.value as ItineraryBlock["type"],
                       })
                     }
@@ -307,8 +307,8 @@ export function ItineraryItemCard({
                     }
                     onChange={(e) =>
                       block.isBooked
-                        ? updateBlock(block.id, { bookedName: e.target.value })
-                        : updateBlock(block.id, { title: e.target.value })
+                        ? updateBlock?.(block.id, { bookedName: e.target.value })
+                        : updateBlock?.(block.id, { title: e.target.value })
                     }
                     className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
                     placeholder="Title"
@@ -321,7 +321,7 @@ export function ItineraryItemCard({
                   <textarea
                     value={block.description}
                     onChange={(e) =>
-                      updateBlock(block.id, { description: e.target.value })
+                      updateBlock?.(block.id, { description: e.target.value })
                     }
                     rows={3}
                     className="mt-1 w-full resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2 text-sm leading-relaxed text-stone-600 placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-200"
@@ -331,7 +331,7 @@ export function ItineraryItemCard({
                 <button
                   type="button"
                   onClick={() =>
-                    updateBlock(block.id, { isBooked: !block.isBooked })
+                    updateBlock?.(block.id, { isBooked: !block.isBooked })
                   }
                   className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
                     block.isBooked
@@ -361,7 +361,7 @@ export function ItineraryItemCard({
                           type="text"
                           value={block.bookedName ?? ""}
                           onChange={(e) =>
-                            updateBlock(block.id, { bookedName: e.target.value })
+                            updateBlock?.(block.id, { bookedName: e.target.value })
                           }
                           placeholder={block.title || "Reservation name"}
                           className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
@@ -375,7 +375,7 @@ export function ItineraryItemCard({
                           type="text"
                           value={block.confirmationNumber ?? ""}
                           onChange={(e) =>
-                            updateBlock(block.id, {
+                            updateBlock?.(block.id, {
                               confirmationNumber: e.target.value,
                             })
                           }
@@ -391,7 +391,7 @@ export function ItineraryItemCard({
                           type="text"
                           value={block.cost ?? ""}
                           onChange={(e) =>
-                            updateBlock(block.id, { cost: e.target.value })
+                            updateBlock?.(block.id, { cost: e.target.value })
                           }
                           placeholder="e.g. $299"
                           className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
@@ -405,7 +405,7 @@ export function ItineraryItemCard({
                           type="url"
                           value={block.actualBookingUrl ?? ""}
                           onChange={(e) =>
-                            updateBlock(block.id, {
+                            updateBlock?.(block.id, {
                               actualBookingUrl: e.target.value,
                             })
                           }
@@ -450,7 +450,7 @@ export function ItineraryItemCard({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => handleFindBookings(block.id, block)}
+                    onClick={() => handleFindBookings?.(block.id, block)}
                     disabled={bookingOptionsLoadingBlockId === block.id}
                     className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300 disabled:opacity-70"
                   >
@@ -499,7 +499,7 @@ export function ItineraryItemCard({
                   </button>
                   <button
                     type="button"
-                    onClick={() => deleteBlock(block.id)}
+                    onClick={() => deleteBlock?.(block.id)}
                     className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50"
                   >
                     <Trash2 className="h-4 w-4" strokeWidth={1.5} />
