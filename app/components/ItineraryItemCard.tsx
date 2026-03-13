@@ -152,7 +152,7 @@ export function ItineraryItemCard({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      toggleIncludeInItinerary(block.id);
+                      toggleIncludeInItinerary?.(block.id);
                     }}
                     className={`rounded-xl p-2 transition ${
                       block.isIncluded !== false
@@ -471,7 +471,7 @@ export function ItineraryItemCard({
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => toggleIncludeInItinerary(block.id)}
+                    onClick={() => toggleIncludeInItinerary?.(block.id)}
                     className={`rounded-xl p-2 transition ${
                       block.isIncluded !== false
                         ? "bg-amber-100 text-amber-600 hover:bg-amber-200"
