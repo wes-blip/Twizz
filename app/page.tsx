@@ -17,7 +17,6 @@ import {
   Plane,
   ExternalLink,
   Bell,
-  Bookmark,
   CheckCircle,
   MessageSquare,
   Menu,
@@ -25,12 +24,6 @@ import {
   Layers,
   CalendarDays,
 } from "lucide-react";
-import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  type DropResult,
-} from "@hello-pangea/dnd";
 import { ItineraryItemCard } from "./components/ItineraryItemCard";
 import { v4 as uuidv4 } from "uuid";
 
@@ -59,6 +52,8 @@ type ItineraryBlock = {
   location: string;
   type: "accommodation" | "activity" | "logistics";
   title: string;
+  /** Teaser for card front (accommodation: 2 sentences; others: 3–5 word TLDR) */
+  summary?: string;
   description: string;
   bookingOptions?: BookingOption[];
   /** Reservation capture (manual overwrite) */
@@ -69,6 +64,10 @@ type ItineraryBlock = {
   actualBookingUrl?: string;
   /** Include in itinerary (curation); default false; only included blocks are saved */
   isIncluded?: boolean;
+  /** Estimated price in dollars (saved to Supabase JSON) */
+  price?: number;
+  /** Google Place ID when user selects a hotel (for Accommodation blocks) */
+  googlePlaceId?: string;
 };
 
 /** Timeline entry: either a real block or a synthetic "check-out" marker for multi-day items. */
@@ -86,6 +85,44 @@ type Trip = {
   user_id?: string;
   status?: string;
 };
+
+/**
+ * Normalize blocks for Supabase persistence. Uses optional googlePlaceId only (no duffelHotelId)
+ * so non-hotel blocks (activity/logistics) never trigger validation on a required hotel id.
+ */
+function blocksForPersistence(blocks: ItineraryBlock[]): Record<string, unknown>[] {
+  const sanitizedBlocks = blocks.map((block) => {
+    const raw = block as { googlePlaceId?: string; duffelHotelId?: string };
+    const googlePlaceId =
+      typeof raw.googlePlaceId === "string" && raw.googlePlaceId.trim()
+        ? raw.googlePlaceId.trim()
+        : typeof raw.duffelHotelId === "string" && raw.duffelHotelId.trim()
+          ? raw.duffelHotelId.trim()
+          : undefined;
+    return {
+      id: block.id,
+      date: block.date,
+      ...(block.endDate ? { endDate: block.endDate } : {}),
+      location: block.location,
+      type: block.type,
+      title: block.title,
+      ...(block.summary !== undefined && block.summary !== "" ? { summary: block.summary } : {}),
+      description: block.description,
+      ...(Array.isArray(block.bookingOptions) && block.bookingOptions.length > 0
+        ? { bookingOptions: block.bookingOptions }
+        : {}),
+      ...(block.isBooked !== undefined ? { isBooked: block.isBooked } : {}),
+      ...(block.bookedName ? { bookedName: block.bookedName } : {}),
+      ...(block.confirmationNumber ? { confirmationNumber: block.confirmationNumber } : {}),
+      ...(block.cost ? { cost: block.cost } : {}),
+      ...(block.actualBookingUrl ? { actualBookingUrl: block.actualBookingUrl } : {}),
+      isIncluded: block.isIncluded,
+      ...(typeof block.price === "number" && Number.isFinite(block.price) ? { price: block.price } : {}),
+      ...(googlePlaceId ? { googlePlaceId } : {}),
+    };
+  });
+  return JSON.parse(JSON.stringify(sanitizedBlocks));
+}
 
 const initialFormData: FormData = {
   destination: "",
@@ -241,6 +278,9 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
           )
         : undefined;
       const endDateRaw = String((block as { endDate?: string }).endDate ?? (block as { checkOutDate?: string }).checkOutDate ?? "").trim() || undefined;
+      const raw = block as { googlePlaceId?: string; duffelHotelId?: string };
+      const googlePlaceId = typeof raw.googlePlaceId === "string" && raw.googlePlaceId.trim() ? raw.googlePlaceId.trim() : (typeof raw.duffelHotelId === "string" && raw.duffelHotelId.trim() ? raw.duffelHotelId.trim() : undefined);
+      const summaryRaw = String((block as { summary?: string }).summary ?? "").trim() || undefined;
       return {
         id: String(block.id ?? uuidv4()),
         date: String(block.date ?? ""),
@@ -251,6 +291,7 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
             ? block.type
             : "activity",
         title: String(block.title ?? ""),
+        ...(summaryRaw ? { summary: summaryRaw } : {}),
         description: String(block.description ?? ""),
         ...(options?.length ? { bookingOptions: options } : {}),
         isBooked: Boolean((block as { isBooked?: boolean }).isBooked),
@@ -258,7 +299,11 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
         confirmationNumber: String((block as { confirmationNumber?: string }).confirmationNumber ?? "").trim() || undefined,
         cost: String((block as { cost?: string }).cost ?? "").trim() || undefined,
         actualBookingUrl: String((block as { actualBookingUrl?: string }).actualBookingUrl ?? "").trim() || undefined,
-        isIncluded: false,
+        isIncluded: (block as { isIncluded?: boolean }).isIncluded !== false,
+        ...(typeof (block as { price?: number }).price === "number" && Number.isFinite((block as { price?: number }).price)
+          ? { price: (block as { price?: number }).price }
+          : {}),
+        ...(googlePlaceId ? { googlePlaceId } : {}),
       };
     });
   }
@@ -506,26 +551,26 @@ export default function Home() {
         );
         return;
       }
-      const blocks = parseTripResponse(data);
+      const rawBlocks = Array.isArray(data)
+        ? data
+        : (data as { itineraryBlocks?: unknown[] }).itineraryBlocks;
+      const blocks = parseTripResponse(rawBlocks);
       setItineraryBlocks(blocks);
       setCurrentTripId(null);
       setTripStatus("draft");
       const destinationLabel = formData.destination.trim() || "Destination";
-      setTripName(`My ${destinationLabel} Trip`);
+      const creativeName = (data as { creativeTripName?: string }).creativeTripName;
+      const nameFromApi =
+        typeof creativeName === "string" && creativeName.trim()
+          ? creativeName.trim()
+          : "";
+      setTripName(nameFromApi || `My ${destinationLabel} Trip`);
       setViewMode("builder");
     } catch {
       setGenerateError("Network error. Please try again.");
     } finally {
       setGenerating(false);
     }
-  };
-
-  const onDragEnd = (result: DropResult) => {
-    if (!result.destination) return;
-    const items = Array.from(itineraryBlocks);
-    const [reordered] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reordered);
-    setItineraryBlocks(items);
   };
 
   const updateBlock = (id: string, patch: Partial<ItineraryBlock>) => {
@@ -539,21 +584,11 @@ export default function Home() {
   };
 
   const toggleIncludeInItinerary = (blockId: string) => {
-    setItineraryBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === blockId);
-      if (idx === -1) return prev;
-      const block = prev[idx];
-      const nextIncluded = block.isIncluded === false;
-      const updated = { ...block, isIncluded: nextIncluded };
-      const rest = prev.filter((b) => b.id !== blockId);
-      if (nextIncluded) {
-        const insertIndex = rest.filter((b) => b.isIncluded).length;
-        const next = [...rest];
-        next.splice(insertIndex, 0, updated);
-        return next;
-      }
-      return [...rest, updated];
-    });
+    setItineraryBlocks((prev) =>
+      prev.map((b) =>
+        b.id === blockId ? { ...b, isIncluded: b.isIncluded === false } : b
+      )
+    );
   };
 
   const handleFindBookings = async (blockId: string, blockData: ItineraryBlock) => {
@@ -597,7 +632,7 @@ export default function Home() {
         description: "Add your own plans here.",
         bookingOptions: undefined,
         isBooked: false,
-        isIncluded: false,
+        isIncluded: true,
       },
     ]);
   };
@@ -613,21 +648,25 @@ export default function Home() {
       );
       return;
     }
-    const blocksToSave = itineraryBlocks.filter((block) => block.isIncluded);
-    if (blocksToSave.length === 0) {
-      alert("Please bookmark at least one item before saving.");
+    const activeBlocks = itineraryBlocks.filter((block) => block.isIncluded !== false);
+    if (activeBlocks.length === 0) {
+      alert("Please keep at least one item before saving.");
       return;
     }
+    const blocksToSave = [...activeBlocks].sort((a, b) =>
+      (a.date || "").localeCompare(b.date || "")
+    );
     const name =
       tripName.trim() ||
       `My ${formData.destination.trim() || "Destination"} Trip`;
     setIsSaving(true);
     setSaveJustSucceeded(false);
     try {
+      const blocksPayload = blocksForPersistence(blocksToSave);
       if (!currentTripId) {
         const { data, error } = await supabase
           .from("trips")
-          .insert({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id, status: "draft" })
+          .insert({ name, blocks: blocksPayload, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id, status: "draft" })
           .select("id")
           .single();
         if (error) throw error;
@@ -636,7 +675,7 @@ export default function Home() {
       } else {
         const { error } = await supabase
           .from("trips")
-          .update({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id })
+          .update({ name, blocks: blocksPayload, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id })
           .eq("id", currentTripId);
         if (error) throw error;
       }
@@ -644,7 +683,9 @@ export default function Home() {
       setSaveJustSucceeded(true);
       setTimeout(() => setSaveJustSucceeded(false), 2000);
     } catch (e) {
-      console.error(e);
+      console.error("SUPABASE ERROR:", e);
+      if (e && typeof e === "object" && "message" in e) console.error("MESSAGE:", (e as { message: unknown }).message);
+      if (e && typeof e === "object" && "details" in e) console.error("DETAILS:", (e as { details: unknown }).details);
       const message =
         e && typeof e === "object" && "message" in e
           ? String((e as { message: unknown }).message)
@@ -666,19 +707,23 @@ export default function Home() {
       );
       return;
     }
-    const blocksToSave = itineraryBlocks.filter((block) => block.isIncluded);
-    if (blocksToSave.length === 0) {
-      alert("Please bookmark at least one item before requesting a booking.");
+    const activeBlocks = itineraryBlocks.filter((block) => block.isIncluded !== false);
+    if (activeBlocks.length === 0) {
+      alert("Please keep at least one item before requesting a booking.");
       return;
     }
+    const blocksToSave = [...activeBlocks].sort((a, b) =>
+      (a.date || "").localeCompare(b.date || "")
+    );
     const name =
       tripName.trim() ||
       `My ${formData.destination.trim() || "Destination"} Trip`;
     try {
+      const blocksPayload = blocksForPersistence(blocksToSave);
       if (currentTripId == null) {
         const { data, error } = await supabase
           .from("trips")
-          .insert({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id, status: "quote_requested" })
+          .insert({ name, blocks: blocksPayload, start_date: formData.startDate, end_date: formData.endDate, user_id: user.id, status: "quote_requested" })
           .select("id")
           .single();
         if (error) throw error;
@@ -689,7 +734,7 @@ export default function Home() {
       } else {
         const { error } = await supabase
           .from("trips")
-          .update({ name, blocks: blocksToSave, start_date: formData.startDate, end_date: formData.endDate, status: "quote_requested" })
+          .update({ name, blocks: blocksPayload, start_date: formData.startDate, end_date: formData.endDate, status: "quote_requested" })
           .eq("id", currentTripId);
         if (error) throw error;
         setTripStatus("quote_requested");
@@ -953,6 +998,16 @@ export default function Home() {
           )}
         </div>
         <nav className="relative flex items-center gap-2">
+          {tripStatus === "draft" && (
+            <button
+              type="button"
+              onClick={() => setShowRequestBookingModal(true)}
+              className="rounded-md bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white transition-colors hover:bg-gray-800"
+              aria-label="Request VIP booking"
+            >
+              VIP
+            </button>
+          )}
           {isFounderVip === true && (
             <Link
               href="/feedback"
@@ -1154,10 +1209,10 @@ export default function Home() {
   // ——— Dashboard View ———
   if (viewMode === "dashboard") {
     return (
-      <div className={`min-h-screen ${isFounderVip === true ? "bg-purple-100" : "bg-[#f8f8f6]"} text-stone-900 antialiased`}>
+      <div className={`min-h-screen overflow-x-hidden ${isFounderVip === true ? "bg-purple-100" : "bg-[#f8f8f6]"} text-stone-900 antialiased`}>
         {authModal}
         {topNav}
-        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
           <div className="mb-8">
             <h1 className="text-2xl font-semibold tracking-tight text-stone-900 sm:text-3xl">
               My Trips
@@ -1215,15 +1270,15 @@ export default function Home() {
           )}
 
           {!tripsLoading && !tripsError && trips.length > 0 && (
-            <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {trips.map((trip) => (
                 <li
                   key={trip.id}
-                  className="group relative flex flex-col rounded-2xl border border-stone-200/90 bg-white p-5 shadow-sm ring-1 ring-black/[0.02] transition hover:border-stone-300 hover:shadow-md"
+                  className="group relative flex min-w-0 w-full flex-col rounded-2xl border border-stone-200/90 bg-white p-5 shadow-sm ring-1 ring-black/[0.02] transition hover:border-stone-300 hover:shadow-md"
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <h2 className="truncate text-lg font-semibold text-stone-900">
+                      <h2 className="break-words whitespace-normal text-lg font-semibold text-stone-900">
                         {trip.name}
                       </h2>
                       <p className="mt-1 text-xs font-medium uppercase tracking-wider text-stone-400">
@@ -1322,16 +1377,6 @@ export default function Home() {
                 />
               </label>
               <div className="flex shrink-0 flex-col items-end gap-2">
-                {tripStatus === "draft" && (
-                  <button
-                    type="button"
-                    onClick={() => setShowRequestBookingModal(true)}
-                    className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-3 text-base font-semibold text-white shadow-lg shadow-amber-500/25 transition hover:bg-amber-600 active:scale-[0.98]"
-                  >
-                    <Bell className="h-5 w-5" strokeWidth={2} aria-hidden />
-                    Request VIP Booking
-                  </button>
-                )}
                 {tripStatus === "quote_requested" && (
                   <span className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-500">
                     <Sparkles className="h-4 w-4 text-stone-400" strokeWidth={1.5} aria-hidden />
@@ -1371,7 +1416,6 @@ export default function Home() {
                           : "Save Trip"}
                     </span>
                   </button>
-                  <p className="text-xs text-gray-500">Un-bookmarked items will be deleted when you save.</p>
                 </div>
               </div>
             </div>
@@ -1459,54 +1503,70 @@ export default function Home() {
             </nav>
           </div>
 
-          {activeView === "builder" && (
-            <>
-              <DragDropContext onDragEnd={onDragEnd}>
-                <Droppable droppableId="itinerary-list">
-                  {(provided) => (
-                    <ul
-                      ref={provided.innerRef}
-                      {...provided.droppableProps}
-                      className="space-y-4"
-                    >
-                      {itineraryBlocks.map((block, index) => (
-                        <Draggable
-                          key={block.id}
-                          draggableId={block.id}
-                          index={index}
-                        >
-                          {(dragProvided, snapshot) => (
-                            <ItineraryItemCard
-                              block={block}
-                              dragHandleProps={dragProvided.dragHandleProps}
-                              dragInnerRef={dragProvided.innerRef}
-                              dragDraggableProps={dragProvided.draggableProps}
-                              snapshot={snapshot}
-                              updateBlock={updateBlock}
-                              deleteBlock={deleteBlock}
-                              toggleIncludeInItinerary={toggleIncludeInItinerary}
-                              handleFindBookings={handleFindBookings}
-                              bookingOptionsLoadingBlockId={bookingOptionsLoadingBlockId}
-                              typeBadgeClass={typeBadgeClass}
-                            />
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                    </ul>
-                  )}
-                </Droppable>
-              </DragDropContext>
+          {activeView === "builder" && (() => {
+            const activeBlocks = itineraryBlocks.filter((b) => b.isIncluded !== false);
+            const discardedBlocks = itineraryBlocks.filter((b) => b.isIncluded === false);
+            const tripTotal = activeBlocks.reduce(
+              (sum, b) => sum + (typeof b.price === "number" && Number.isFinite(b.price) ? b.price : 0),
+              0
+            );
+            return (
+              <>
+                <ul className="space-y-4">
+                  {activeBlocks.map((block) => (
+                    <ItineraryItemCard
+                      key={block.id}
+                      block={block}
+                      dragHandleProps={null}
+                      updateBlock={updateBlock}
+                      deleteBlock={deleteBlock}
+                      toggleIncludeInItinerary={toggleIncludeInItinerary}
+                      typeBadgeClass={typeBadgeClass}
+                    />
+                  ))}
+                </ul>
 
-              <button
-                type="button"
-                onClick={addCustomBlock}
-                className="mt-6 w-full rounded-2xl border border-dashed border-stone-300 bg-white/60 py-4 text-sm font-medium text-stone-600 shadow-sm transition hover:border-stone-400 hover:bg-white hover:text-stone-900"
-              >
-                + Add custom block
-              </button>
-            </>
-          )}
+                <button
+                  type="button"
+                  onClick={addCustomBlock}
+                  className="mt-6 w-full rounded-2xl border border-dashed border-stone-300 bg-white/60 py-4 text-sm font-medium text-stone-600 shadow-sm transition hover:border-stone-400 hover:bg-white hover:text-stone-900"
+                >
+                  + Add custom block
+                </button>
+
+                <hr className="my-8 border-gray-300" />
+
+                {discardedBlocks.length > 0 && (
+                  <div className="opacity-50 grayscale">
+                    <ul className="space-y-4">
+                      {discardedBlocks.map((block) => (
+                        <ItineraryItemCard
+                          key={block.id}
+                          block={block}
+                          dragHandleProps={null}
+                          updateBlock={updateBlock}
+                          deleteBlock={deleteBlock}
+                          toggleIncludeInItinerary={toggleIncludeInItinerary}
+                          typeBadgeClass={typeBadgeClass}
+                        />
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="mt-6 flex flex-col gap-4">
+                  <div className="rounded-2xl border border-stone-200 bg-white/90 px-5 py-4 shadow-sm ring-1 ring-black/[0.03]">
+                    <p className="text-sm font-medium uppercase tracking-wider text-stone-500">
+                      Total Estimated Cost
+                    </p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-stone-900">
+                      ${tripTotal.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {activeView === "map" && (
             <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-stone-200 bg-white/80 py-16 text-center shadow-sm">
@@ -1577,11 +1637,16 @@ export default function Home() {
                                   className="absolute -left-8 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-white shadow-sm"
                                   aria-hidden
                                 />
-                                <span
-                                  className={`inline-block w-fit max-w-md rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass("accommodation")}`}
-                                >
-                                  Check out: {title}
-                                </span>
+                              <span
+                                className={`inline-flex w-fit max-w-md items-center gap-2 rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass("accommodation")}`}
+                              >
+                                Check out: {title}
+                                {typeof source.price === "number" && source.price > 0 && (
+                                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
+                                    ${source.price.toLocaleString()}
+                                  </span>
+                                )}
+                              </span>
                               </li>
                             );
                           }
@@ -1613,9 +1678,14 @@ export default function Home() {
                                 aria-hidden
                               />
                               <span
-                                className={`inline-block w-fit max-w-md rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass(block.type)}`}
+                                className={`inline-flex w-fit max-w-md items-center gap-2 rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass(block.type)}`}
                               >
                                 {blurbLabel}
+                                {typeof block.price === "number" && block.price > 0 && (
+                                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
+                                    ${block.price.toLocaleString()}
+                                  </span>
+                                )}
                               </span>
                             </li>
                           );

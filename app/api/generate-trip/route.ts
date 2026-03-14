@@ -22,6 +22,9 @@ type ItineraryBlock = {
   location: string;
   type: "accommodation" | "activity" | "logistics";
   title: string;
+  /** Teaser for card front (accommodation: 2 sentences; others: 3–5 word TLDR) */
+  summary?: string;
+  /** Full detail for card back (accommodation: hotel names + vibes; others: 1-sentence vibe) */
   description: string;
 };
 
@@ -29,50 +32,72 @@ type ItineraryBlock = {
  * Strips markdown code fences and stray backticks, then parses JSON.
  * Uses try/catch and multiple fallback strategies for robustness.
  */
-function parseJsonFromGemini(text: string): { itineraryBlocks: ItineraryBlock[] } {
+function parseJsonFromGemini(text: string): { itineraryBlocks: ItineraryBlock[]; creativeTripName: string } {
   let raw = String(text ?? "").trim();
 
-  // Remove markdown code fences (```json ... ``` or ``` ... ```)
-  raw = raw.replace(/^```(?:json)?\s*/i, "");
-  raw = raw.replace(/\s*```$/m, "");
-  raw = raw.trim();
-
-  // If still wrapped in a single fence block, extract inner content
-  const fenceMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
-  if (fenceMatch) {
-    raw = fenceMatch[1].trim();
-  }
+  // Bulletproof markdown strip: remove all ```json and ``` so we never parse code fences
+  const cleanedResponse = raw
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  raw = cleanedResponse;
 
   // Strip any remaining leading/trailing backticks that snuck through
   raw = raw.replace(/^`+|`+$/g, "").trim();
 
+  function tryParse(s: string): unknown {
+    return JSON.parse(s);
+  }
+
+  function repairUnescapedNewlinesInStrings(s: string): string {
+    // Fix unescaped literal newlines inside double-quoted JSON strings (common LLM mistake)
+    return s.replace(/"([^"\\]|\\.)*"/g, (match) =>
+      match.replace(/\n/g, "\\n").replace(/\r/g, "\\r")
+    );
+  }
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = tryParse(raw);
   } catch {
-    // Fallback: try to extract first {...} or [...] substring and parse
-    const objectMatch = raw.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      try {
-        parsed = JSON.parse(objectMatch[0]);
-      } catch {
+    try {
+      parsed = tryParse(repairUnescapedNewlinesInStrings(raw));
+    } catch {
+      // Fallback: try to extract first {...} substring and parse (optionally with newline repair)
+      const objectMatch = raw.match(/\{[\s\S]*\}/);
+      if (objectMatch) {
+        const candidate = objectMatch[0];
+        try {
+          parsed = tryParse(candidate);
+        } catch {
+          try {
+            parsed = tryParse(repairUnescapedNewlinesInStrings(candidate));
+          } catch {
+            throw new Error("Could not parse JSON from model response");
+          }
+        }
+      } else {
         throw new Error("Could not parse JSON from model response");
       }
-    } else {
-      throw new Error("Could not parse JSON from model response");
     }
   }
 
-  const obj = parsed as { itineraryBlocks?: unknown };
+  const obj = parsed as { itineraryBlocks?: unknown; creativeTripName?: unknown };
   const blocks = obj.itineraryBlocks;
   if (!Array.isArray(blocks)) {
     throw new Error("Response missing itineraryBlocks array");
   }
 
+  const creativeTripName =
+    typeof obj.creativeTripName === "string" && obj.creativeTripName.trim()
+      ? obj.creativeTripName.trim()
+      : "";
+
   // Normalize each block to ensure required fields exist as strings
   const itineraryBlocks: ItineraryBlock[] = blocks.map((b: unknown) => {
     const block = b as Record<string, unknown>;
     const endDate = typeof block.endDate === "string" ? block.endDate.trim() : undefined;
+    const summary = typeof block.summary === "string" ? block.summary.trim() : undefined;
     return {
       date: typeof block.date === "string" ? block.date : "",
       ...(endDate ? { endDate } : {}),
@@ -82,31 +107,77 @@ function parseJsonFromGemini(text: string): { itineraryBlocks: ItineraryBlock[] 
           ? block.type
           : "activity",
       title: typeof block.title === "string" ? block.title : "",
+      ...(summary ? { summary } : {}),
       description: typeof block.description === "string" ? block.description : "",
     };
   });
 
-  return { itineraryBlocks };
+  return { itineraryBlocks, creativeTripName };
 }
 
 const SYSTEM_INSTRUCTION = `You are an elite travel agent with deep knowledge of destinations, pacing, and group dynamics.
 
-You must respond with a single valid JSON object only—no markdown, no code fences, no explanation before or after.
+——— JSON OUTPUT (UNBREAKABLE) ———
+You MUST return ONLY valid, minified JSON. No markdown (no \`\`\`json or code fences). No explanation, preamble, or text before or after the JSON. Returning valid JSON is required. For any multi-line strings (e.g. accommodation description), you MUST use escaped newline characters (\\n) inside the string—never literal line breaks inside quoted strings, or parsing will fail.
 
-The JSON object must have exactly one top-level key: "itineraryBlocks", whose value is an array.
+The JSON object must have exactly two top-level keys: "creativeTripName" (string) and "itineraryBlocks" (array).
 
-STRICT RULE — Activity count: You must generate a minimum of 3 and a strict maximum of 10 Activity blocks total for the entire itinerary, regardless of how many days the trip is. Focus on high-quality, anchor experiences rather than filling every hour of the day. Do not generate multiple minor activities per day; curate only the best.
+——— creativeTripName ———
+A catchy, evocative trip name in 3–4 words max using destination and vibe. Examples: "Cabo Sunny Escape", "Paris Romance Affair". Do NOT use generic names like "My Trip".
 
-STRICT RULE — Accommodation (Fora Partner / luxury consortium): When recommending accommodations, you MUST prioritize properties that are part of luxury travel advisor networks (e.g., Virtuoso, Four Seasons Preferred, Rosewood Elite, Belmond Bellini, Hyatt Privé, Marriott Stars) or highly-rated independent boutique hotels. The user acts as a VIP travel advisor, so these specific partner properties are strictly preferred over generic chain hotels or budget options. For every accommodation block, ensure the title explicitly mentions the specific hotel name (e.g., "Four Seasons Resort Maui at Wailea" not "Luxury resort in Maui").
+——— PROGRESSIVE DISCLOSURE: summary (card front) vs description (card back) ———
+Every block MUST have both "summary" and "description". Use escaped newlines (\\n) in strings; never literal line breaks inside JSON strings.
 
-Each element of itineraryBlocks must be an object with:
-- "date": string in YYYY-MM-DD format. Compute each block's date from the trip's startDate to endDate in the user message; assign blocks to calendar days in order so the itinerary is date-specific and multi-leg aware. For accommodation blocks, you may include an "endDate" (YYYY-MM-DD) for check-out when the stay spans multiple days.
-- "location": string — city or area where this block takes place (may repeat or change per leg).
-- "type": one of "accommodation", "activity", "logistics"
-- "title": short, compelling title for the block. For accommodation blocks, the title MUST include the specific hotel/property name.
-- "description": practical, specific details. For accommodations, prefer luxury advisor partner properties (Virtuoso, Four Seasons Preferred, Rosewood Elite, Belmond Bellini, Hyatt Privé, Marriott Stars) or top boutique hotels. If the traveler group size is greater than 4, consider VRBO or Airbnb-style stays only when they clearly outperform available partner hotels.
+——— ACCOMMODATION ———
+summary (STRICTLY two sentences): Replace the bracketed variables with the actual vibes of the chosen hotels.
+Template: "Hotels with [vibe 1], [vibe 2], and [vibe 3] vibes available. Click in to see specifically curated recommendations."
+If group size (people) > 4, use "Vacation rentals" instead of "Hotels" in that sentence.
 
-Build a coherent day-by-day flow that matches the trip length and vibe given in the user message. Every block must include date, location, type, title, and description.`;
+description (the inside / edit view): STRICTLY hotel names and vibes, one per line, then the instruction line. Format:
+[Hotel 1] - [vibe 1]
+[Hotel 2] - [vibe 2]
+[Hotel 3] - [vibe 3]
+\\nFind pricing by searching these or others.
+
+Example description (use \\n before "Find pricing"):
+Piccolo - local vibes
+Cheval - pure luxury
+Paso Robles Inn - lower cost option
+\\nFind pricing by searching these or others.
+
+Adjust recommendations for group size: hotels for <=4 people, Vrbos/villas for >4 people. No extra words in description—only name and 1-3 word vibe per line.
+
+——— ACTIVITY / DINING / LOGISTICS (other blocks) ———
+summary: A 3–5 word TLDR only (e.g. "Sunset acoustic sailing", "Speakeasy craft cocktails").
+description: Exactly one short sentence—the vibe detail. No paragraphs or history.
+Examples: description "Chill acoustic vibes with open bar." or "Dark, moody, craft cocktails."
+
+——— Accommodation block (traveler count) ———
+Use the "people" field. If people <= 4, recommend HOTELS only. If people > 4, recommend LARGE VACATION RENTALS / VRBO-style properties only. Never mix.
+
+——— Accommodation block title ———
+For accommodation blocks, set "title" to exactly "Where to Stay". No hotel names in the title.
+
+——— Activity count ———
+Minimum 3, maximum 10 Activity blocks total for the entire itinerary. Curate only the best; do not fill every hour.
+
+——— Accommodation (Fora Partner / luxury) ———
+For hotels (people <= 4): prefer luxury advisor networks (Virtuoso, Four Seasons Preferred, Rosewood Elite, Belmond Bellini, Hyatt Privé, Marriott Stars) or top boutique hotels. For large rentals (people > 4): prefer high-end villas and whole-home listings.
+
+——— Accommodation blocks (date fields) ———
+If type is "accommodation", you MUST include both "date" (check-in, YYYY-MM-DD) and "endDate" (check-out, YYYY-MM-DD). Never omit endDate.
+
+——— itineraryBlocks schema ———
+Each element must have:
+- "date": YYYY-MM-DD. Compute from trip startDate/endDate; assign blocks to calendar days. Accommodation blocks also need "endDate".
+- "endDate": (REQUIRED for type "accommodation" only) YYYY-MM-DD check-out.
+- "location": city or area.
+- "type": "accommodation" | "activity" | "logistics"
+- "title": short title. For accommodation only: exactly "Where to Stay".
+- "summary": Accommodation = two sentences per template (Hotels/Vacation rentals + vibes; "Click in to see..."). Activity/logistics = 3–5 word TLDR.
+- "description": Accommodation = [Name] - [vibe] per line, then \\nFind pricing by searching these or others. Activity/logistics = one short sentence, vibe only.
+
+Build a coherent day-by-day flow. Every block: date, location, type, title, summary, description. Accommodation blocks: also endDate.`;
 
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -140,7 +211,9 @@ export async function POST(request: Request) {
   const userPrompt = `Plan a trip with these details (use them to shape the itinerary and accommodation suggestions):
 ${JSON.stringify(formData, null, 2)}
 
-Return only the JSON object with itineraryBlocks as specified. Each block must have date (YYYY-MM-DD from startDate to endDate), location, type, title, and description. Accommodation blocks may include endDate for check-out.`;
+Return ONLY valid minified JSON (no markdown, no code fences). Multi-line strings MUST use \\n—never literal newlines inside quotes. JSON with:
+1. "creativeTripName": catchy 3–4 word trip name (destination + vibe).
+2. "itineraryBlocks": each block has date, location, type, title, summary, description. Accommodation: summary = two sentences (Hotels/Vacation rentals + vibes; "Click in to see..."); description = [Name] - [vibe] per line, then \\nFind pricing by searching these or others. Activity/logistics: summary = 3–5 word TLDR; description = one short sentence. Accommodation blocks must include date and endDate.`;
 
   try {
     const result = await model.generateContent({
@@ -152,9 +225,11 @@ Return only the JSON object with itineraryBlocks as specified. Each block must h
 
     const text = result.response.text();
     let itineraryBlocks: ItineraryBlock[];
+    let creativeTripName: string;
     try {
       const parsed = parseJsonFromGemini(text);
       itineraryBlocks = parsed.itineraryBlocks;
+      creativeTripName = parsed.creativeTripName;
     } catch (parseErr) {
       const parseMessage =
         parseErr instanceof Error ? parseErr.message : "Parse failed";
@@ -169,7 +244,10 @@ Return only the JSON object with itineraryBlocks as specified. Each block must h
       id: uuidv4(),
     }));
 
-    return NextResponse.json(withIds);
+    return NextResponse.json({
+      itineraryBlocks: withIds,
+      creativeTripName: creativeTripName || undefined,
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to generate itinerary";
     return NextResponse.json({ error: message }, { status: 502 });

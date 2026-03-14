@@ -4,14 +4,10 @@ import React, { useState } from "react";
 import {
   GripVertical,
   Trash2,
-  Loader2,
-  CheckCircle,
-  ExternalLink,
-  Sparkles,
-  Bookmark,
   Pencil,
   X,
 } from "lucide-react";
+import { LiveHotelSearch, type HotelSearchResult } from "./LiveHotelSearch";
 
 type BookingOption = {
   providerName: string;
@@ -28,6 +24,8 @@ export type ItineraryBlock = {
   location: string;
   type: "accommodation" | "activity" | "logistics";
   title: string;
+  /** Teaser for card front (accommodation: 2 sentences; others: 3–5 word TLDR). Fallback to description for legacy. */
+  summary?: string;
   description: string;
   bookingOptions?: BookingOption[];
   isBooked?: boolean;
@@ -36,11 +34,15 @@ export type ItineraryBlock = {
   cost?: string;
   actualBookingUrl?: string;
   isIncluded?: boolean;
+  /** Estimated price in dollars (saved to Supabase JSON) */
+  price?: number;
+  /** Google Place ID when user selects a hotel (for Accommodation blocks) */
+  googlePlaceId?: string;
 };
 
 type ItineraryItemCardProps = {
   block: ItineraryBlock;
-  /** When true, only the front (read-only) content is shown; no drag/edit/bookmark. */
+  /** When true, only the front (read-only) content is shown; no drag/edit/discard. */
   readOnly?: boolean;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement> | null;
   dragInnerRef?: (el: HTMLElement | null) => void;
@@ -49,8 +51,6 @@ type ItineraryItemCardProps = {
   updateBlock?: (id: string, patch: Partial<ItineraryBlock>) => void;
   deleteBlock?: (id: string) => void;
   toggleIncludeInItinerary?: (blockId: string) => void;
-  handleFindBookings?: (blockId: string, blockData: ItineraryBlock) => void;
-  bookingOptionsLoadingBlockId?: string | null;
   typeBadgeClass: (type: ItineraryBlock["type"]) => string;
 };
 
@@ -64,11 +64,10 @@ export function ItineraryItemCard({
   updateBlock,
   deleteBlock,
   toggleIncludeInItinerary,
-  handleFindBookings,
-  bookingOptionsLoadingBlockId = null,
   typeBadgeClass,
 }: ItineraryItemCardProps) {
   const [isFlipped, setIsFlipped] = useState(false);
+  const [isCheckingPrice, setIsCheckingPrice] = useState(false);
 
   const handleSave = () => {
     // Data is already in parent state via updateBlock on each field change; flip back to front.
@@ -93,16 +92,15 @@ export function ItineraryItemCard({
         <h3 className="mt-2 line-clamp-2 min-w-0 text-base font-semibold tracking-tight text-stone-900">
           {block.isBooked ? (block.bookedName ?? block.title) : block.title || "Untitled"}
         </h3>
-        {block.description ? (
-          <p className="mt-1 line-clamp-2 min-w-0 text-sm leading-relaxed text-stone-600">
-            {block.description}
+        {(block.summary ?? block.description) ? (
+          <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-600">
+            {block.summary ?? block.description}
           </p>
         ) : null}
-        {block.isBooked && (
-          <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-            <CheckCircle className="h-3.5 w-3.5" strokeWidth={2} />
-            Booked
-          </div>
+        {typeof block.price === "number" && block.price > 0 && (
+          <span className="mt-2 inline-flex w-fit items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
+            ${block.price.toLocaleString()}
+          </span>
         )}
       </div>
     );
@@ -150,74 +148,51 @@ export function ItineraryItemCard({
                 <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
+                    onClick={() => setIsFlipped(true)}
+                    className="rounded-full p-2 text-blue-600 bg-blue-50 transition-colors hover:bg-blue-100"
+                    aria-label="Edit / View details"
+                  >
+                    <Pencil className="h-5 w-5" strokeWidth={1.5} />
+                  </button>
+                  <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleIncludeInItinerary?.(block.id);
                     }}
                     className={`rounded-xl p-2 transition ${
-                      block.isIncluded !== false
-                        ? "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                      block.isIncluded === false
+                        ? "bg-red-50 text-red-600 hover:bg-red-100"
                         : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
                     }`}
                     aria-label={
-                      block.isIncluded !== false
-                        ? "Included in itinerary"
-                        : "Include in itinerary"
+                      block.isIncluded === false
+                        ? "Discarded — click to keep"
+                        : "Discard from itinerary"
                     }
-                    aria-pressed={block.isIncluded !== false}
+                    aria-pressed={block.isIncluded === false}
                   >
-                    <Bookmark
+                    <Trash2
                       className="h-5 w-5"
-                      strokeWidth={block.isIncluded !== false ? 2.5 : 1.5}
-                      fill={block.isIncluded !== false ? "currentColor" : "none"}
+                      strokeWidth={block.isIncluded === false ? 2.5 : 1.5}
+                      fill={block.isIncluded === false ? "currentColor" : "none"}
                     />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsFlipped(true)}
-                    className="rounded-xl p-2 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
-                    aria-label="Edit"
-                  >
-                    <Pencil className="h-5 w-5" strokeWidth={1.5} />
                   </button>
                 </div>
               </div>
               <h3 className="mt-2 line-clamp-2 min-w-0 text-lg font-semibold tracking-tight text-stone-900">
                 {block.isBooked ? (block.bookedName ?? block.title) : block.title || "Untitled"}
               </h3>
-              {block.description ? (
-                <p className="mt-1 line-clamp-3 min-w-0 text-sm leading-relaxed text-stone-600">
-                  {block.description}
+              {(block.summary ?? block.description) ? (
+                <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-600">
+                  {block.summary ?? block.description}
                 </p>
               ) : null}
-              {block.isBooked && (
-                <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                  <CheckCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                  Booked
-                </div>
+              {typeof block.price === "number" && block.price > 0 && (
+                <span className="mt-2 inline-flex w-fit items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
+                  ${block.price.toLocaleString()}
+                </span>
               )}
-              {block.bookingOptions && block.bookingOptions.length > 0 ? (
-                <ul className="mt-3 flex min-w-0 flex-col gap-1">
-                  {block.bookingOptions.slice(0, 2).map((opt, i) => (
-                    <li key={i} className="min-w-0">
-                      <a
-                        href={opt.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex max-w-full items-center gap-1.5 truncate text-sm text-stone-600 underline decoration-stone-300 hover:decoration-stone-500"
-                      >
-                        {opt.providerName}
-                        <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.5} />
-                      </a>
-                    </li>
-                  ))}
-                  {block.bookingOptions.length > 2 && (
-                    <li className="text-xs text-stone-400">
-                      +{block.bookingOptions.length - 2} more
-                    </li>
-                  )}
-                </ul>
-              ) : null}
             </div>
 
             {/* Back — edit form; permanently [transform:rotateY(180deg)] so text faces forward when parent flips */}
@@ -300,23 +275,45 @@ export function ItineraryItemCard({
                   <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
                     Title
                   </label>
-                  <input
-                    type="text"
-                    value={
-                      block.isBooked ? (block.bookedName ?? block.title) : block.title
-                    }
-                    onChange={(e) =>
-                      block.isBooked
-                        ? updateBlock?.(block.id, { bookedName: e.target.value })
-                        : updateBlock?.(block.id, { title: e.target.value })
-                    }
-                    className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                    placeholder="Title"
-                  />
+                  {block.type === "accommodation" ? (
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={
+                        block.isBooked
+                          ? (block.bookedName ?? block.title)
+                          : block.title === "Where to stay" || block.title === "Where to Stay"
+                            ? ""
+                            : block.title ?? ""
+                      }
+                      title="Title is set by selecting a hotel from the search below"
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-100 px-3 py-2 text-sm text-stone-600 cursor-not-allowed placeholder:text-stone-400"
+                      placeholder="Where to Stay — select a hotel below"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={
+                        block.isBooked
+                          ? (block.bookedName ?? block.title)
+                          : block.title
+                      }
+                      onChange={(e) =>
+                        block.isBooked
+                          ? updateBlock?.(block.id, {
+                              bookedName: e.target.value,
+                            })
+                          : updateBlock?.(block.id, { title: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                      placeholder="Title"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                    Description
+                    {block.type === "accommodation" ? "Recommendations" : "Description"}
                   </label>
                   <textarea
                     value={block.description}
@@ -324,170 +321,114 @@ export function ItineraryItemCard({
                       updateBlock?.(block.id, { description: e.target.value })
                     }
                     rows={3}
-                    className="mt-1 w-full resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2 text-sm leading-relaxed text-stone-600 placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-200"
-                    placeholder="Description"
+                    className="mt-1 w-full resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2 text-sm leading-relaxed text-stone-600 placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-200 whitespace-pre-wrap"
+                    placeholder={block.type === "accommodation" ? "Recommendations" : "Description"}
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateBlock?.(block.id, { isBooked: !block.isBooked })
-                  }
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
-                    block.isBooked
-                      ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-                      : "bg-stone-50 text-stone-600 ring-stone-200 hover:bg-stone-100"
-                  }`}
-                  aria-pressed={block.isBooked}
-                >
-                  <CheckCircle
-                    className={`h-3.5 w-3.5 ${block.isBooked ? "text-emerald-600" : "text-stone-400"}`}
-                    strokeWidth={2}
-                    aria-hidden
-                  />
-                  Mark as Booked
-                </button>
-                {block.isBooked && (
-                  <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
-                      Confirmed Reservation Details
-                    </span>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="sm:col-span-2">
-                        <span className="mb-1 block text-xs font-medium text-stone-500">
-                          Name (as booked)
-                        </span>
-                        <input
-                          type="text"
-                          value={block.bookedName ?? ""}
-                          onChange={(e) =>
-                            updateBlock?.(block.id, { bookedName: e.target.value })
-                          }
-                          placeholder={block.title || "Reservation name"}
-                          className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                        />
-                      </label>
-                      <label>
-                        <span className="mb-1 block text-xs font-medium text-stone-500">
-                          Confirmation number
-                        </span>
-                        <input
-                          type="text"
-                          value={block.confirmationNumber ?? ""}
-                          onChange={(e) =>
-                            updateBlock?.(block.id, {
-                              confirmationNumber: e.target.value,
-                            })
-                          }
-                          placeholder="e.g. ABC123"
-                          className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                        />
-                      </label>
-                      <label>
-                        <span className="mb-1 block text-xs font-medium text-stone-500">
-                          Cost
-                        </span>
-                        <input
-                          type="text"
-                          value={block.cost ?? ""}
-                          onChange={(e) =>
-                            updateBlock?.(block.id, { cost: e.target.value })
-                          }
-                          placeholder="e.g. $299"
-                          className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                        />
-                      </label>
-                      <label className="sm:col-span-2">
-                        <span className="mb-1 block text-xs font-medium text-stone-500">
-                          Booking URL
-                        </span>
-                        <input
-                          type="url"
-                          value={block.actualBookingUrl ?? ""}
-                          onChange={(e) =>
-                            updateBlock?.(block.id, {
-                              actualBookingUrl: e.target.value,
-                            })
-                          }
-                          placeholder="https://..."
-                          className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                        />
-                      </label>
-                    </div>
+                {block.type === "accommodation" && (
+                  <div>
+                    <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                      Search for Official Hotel:
+                    </label>
+                    <LiveHotelSearch
+                      value={
+                        block.title === "Where to stay" || block.title === "Where to Stay"
+                          ? ""
+                          : block.title ?? ""
+                      }
+                      onSelect={(hotel: HotelSearchResult) => {
+                        updateBlock?.(block.id, {
+                          title: hotel.name,
+                          googlePlaceId: hotel.id,
+                        });
+                      }}
+                      placeholder="Search our recommendations here..."
+                    />
                   </div>
                 )}
-                {block.bookingOptions && block.bookingOptions.length > 0 ? (
-                  <div className="space-y-2">
-                    <span className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                      Book with
-                    </span>
-                    <ul className="flex flex-col gap-2">
-                      {block.bookingOptions.map((opt, i) => (
-                        <li key={i}>
-                          <a
-                            href={opt.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-sm transition hover:border-stone-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-stone-300"
-                          >
-                            <span className="min-w-0 flex-1">
-                              <span className="font-medium text-stone-900">
-                                {opt.providerName}
-                              </span>
-                              <span className="mt-0.5 block text-sm text-stone-600">
-                                {opt.why}
-                              </span>
-                            </span>
-                            <ExternalLink
-                              className="h-4 w-4 shrink-0 text-stone-400"
-                              strokeWidth={1.5}
-                            />
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleFindBookings?.(block.id, block)}
-                    disabled={bookingOptionsLoadingBlockId === block.id}
-                    className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300 disabled:opacity-70"
-                  >
-                    {bookingOptionsLoadingBlockId === block.id ? (
-                      <Loader2
-                        className="h-4 w-4 shrink-0 animate-spin"
-                        strokeWidth={1.5}
-                      />
-                    ) : (
-                      <Sparkles
-                        className="h-4 w-4 shrink-0 text-amber-500"
-                        strokeWidth={1.5}
-                      />
+                <div>
+                  <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                    Estimated Price ($)
+                  </label>
+                  <div className="mt-1 flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={block.price ?? ""}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const num = raw === "" ? undefined : Number(raw);
+                        updateBlock?.(block.id, {
+                          price: num !== undefined && Number.isFinite(num) ? num : undefined,
+                        });
+                      }}
+                      placeholder="e.g. 450"
+                      className="w-full max-w-[8rem] rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                    />
+                    {block.type === "accommodation" && (
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!block.googlePlaceId) return;
+                            if (!block.endDate) {
+                              alert("Please select a Check-Out date first");
+                              return;
+                            }
+                            setIsCheckingPrice(true);
+                            try {
+                              const res = await fetch(
+                                "/api/hotels/price?googlePlaceId=" +
+                                  encodeURIComponent(block.googlePlaceId) +
+                                  "&checkIn=" +
+                                  encodeURIComponent(block.date) +
+                                  "&checkOut=" +
+                                  encodeURIComponent(block.endDate)
+                              );
+                              if (!res.ok) throw new Error("Price fetch failed");
+                              const data = await res.json();
+                              updateBlock?.(block.id, { price: data.price });
+                            } finally {
+                              setIsCheckingPrice(false);
+                            }
+                          }}
+                          disabled={!block.googlePlaceId || isCheckingPrice}
+                          className="w-fit px-3 py-1.5 text-sm font-medium bg-stone-100 border border-stone-200 rounded-md hover:bg-stone-200 transition disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                          {isCheckingPrice
+                            ? "Checking…"
+                            : "Check Live Price"}
+                        </button>
+                        <p className="text-xs text-stone-500">
+                          {block.googlePlaceId
+                            ? "✅ Official Hotel Linked"
+                            : "⚠️ Search and select a hotel above to check live prices"}
+                        </p>
+                      </div>
                     )}
-                    Find Bookings
-                  </button>
-                )}
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => toggleIncludeInItinerary?.(block.id)}
                     className={`rounded-xl p-2 transition ${
-                      block.isIncluded !== false
-                        ? "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                      block.isIncluded === false
+                        ? "bg-red-50 text-red-600 hover:bg-red-100"
                         : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
                     }`}
                     aria-label={
-                      block.isIncluded !== false
-                        ? "Included in itinerary"
-                        : "Include in itinerary"
+                      block.isIncluded === false
+                        ? "Discarded — click to keep"
+                        : "Discard from itinerary"
                     }
-                    aria-pressed={block.isIncluded !== false}
+                    aria-pressed={block.isIncluded === false}
                   >
-                    <Bookmark
+                    <Trash2
                       className="h-5 w-5"
-                      strokeWidth={block.isIncluded !== false ? 2.5 : 1.5}
-                      fill={block.isIncluded !== false ? "currentColor" : "none"}
+                      strokeWidth={block.isIncluded === false ? 2.5 : 1.5}
+                      fill={block.isIncluded === false ? "currentColor" : "none"}
                     />
                   </button>
                   <button
