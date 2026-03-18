@@ -55,6 +55,8 @@ type ItineraryBlock = {
   /** Teaser for card front (accommodation: 2 sentences; others: 3–5 word TLDR) */
   summary?: string;
   description: string;
+  /** For Accommodation blocks: exactly 3 options as "Hotel Name - Vibe" per line */
+  recommendations?: string;
   bookingOptions?: BookingOption[];
   /** Reservation capture (manual overwrite) */
   isBooked?: boolean;
@@ -68,6 +70,20 @@ type ItineraryBlock = {
   price?: number;
   /** Google Place ID when user selects a hotel (for Accommodation blocks) */
   googlePlaceId?: string;
+  /** Hotelbeds temporary rate identifier (Availability → CheckRate → Book flow) */
+  rateKey?: string;
+  /** Hotelbeds rate type: 'BOOKABLE' (direct book) or 'RECHECK' (must call CheckRate first) */
+  rateType?: string;
+  /** Cancellation policy from the rate (string or structured object) */
+  cancellationPolicy?: string | Record<string, unknown>;
+  /** APItude flow state: 'searched' | 'quoted' | 'booked' */
+  bookingStatus?: string;
+  /** Final booking reference from Hotelbeds after booking */
+  confirmationCode?: string;
+  /** Supplier name from booking (for voucher legal text) */
+  supplierName?: string;
+  /** Supplier VAT from booking (for voucher legal text) */
+  supplierVat?: string;
 };
 
 /** Timeline entry: either a real block or a synthetic "check-out" marker for multi-day items. */
@@ -108,6 +124,7 @@ function blocksForPersistence(blocks: ItineraryBlock[]): Record<string, unknown>
       title: block.title,
       ...(block.summary !== undefined && block.summary !== "" ? { summary: block.summary } : {}),
       description: block.description,
+      ...(block.recommendations !== undefined && block.recommendations !== "" ? { recommendations: block.recommendations } : {}),
       ...(Array.isArray(block.bookingOptions) && block.bookingOptions.length > 0
         ? { bookingOptions: block.bookingOptions }
         : {}),
@@ -119,6 +136,17 @@ function blocksForPersistence(blocks: ItineraryBlock[]): Record<string, unknown>
       isIncluded: block.isIncluded,
       ...(typeof block.price === "number" && Number.isFinite(block.price) ? { price: block.price } : {}),
       ...(googlePlaceId ? { googlePlaceId } : {}),
+      ...(typeof (block as { lat?: number }).lat === "number" && Number.isFinite((block as { lat?: number }).lat) ? { lat: (block as { lat?: number }).lat } : {}),
+      ...(typeof (block as { lng?: number }).lng === "number" && Number.isFinite((block as { lng?: number }).lng) ? { lng: (block as { lng?: number }).lng } : {}),
+      ...((block as { priceNote?: string }).priceNote ? { priceNote: (block as { priceNote?: string }).priceNote } : {}),
+      ...((block as { rateKey?: string }).rateKey ? { rateKey: (block as { rateKey?: string }).rateKey } : {}),
+      ...((block as { rateType?: string }).rateType ? { rateType: (block as { rateType?: string }).rateType } : {}),
+      ...((block as { cancellationPolicy?: string | Record<string, unknown> }).cancellationPolicy != null ? { cancellationPolicy: (block as { cancellationPolicy?: string | Record<string, unknown> }).cancellationPolicy } : {}),
+      ...(Array.isArray((block as { cancellationPolicies?: unknown[] }).cancellationPolicies) && (block as { cancellationPolicies: unknown[] }).cancellationPolicies.length > 0 ? { cancellationPolicies: (block as { cancellationPolicies: unknown[] }).cancellationPolicies } : {}),
+      ...((block as { bookingStatus?: string }).bookingStatus ? { bookingStatus: (block as { bookingStatus?: string }).bookingStatus } : {}),
+      ...((block as { confirmationCode?: string }).confirmationCode ? { confirmationCode: (block as { confirmationCode?: string }).confirmationCode } : {}),
+      ...((block as { supplierName?: string }).supplierName ? { supplierName: (block as { supplierName?: string }).supplierName } : {}),
+      ...((block as { supplierVat?: string }).supplierVat ? { supplierVat: (block as { supplierVat?: string }).supplierVat } : {}),
     };
   });
   return JSON.parse(JSON.stringify(sanitizedBlocks));
@@ -281,6 +309,7 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
       const raw = block as { googlePlaceId?: string; duffelHotelId?: string };
       const googlePlaceId = typeof raw.googlePlaceId === "string" && raw.googlePlaceId.trim() ? raw.googlePlaceId.trim() : (typeof raw.duffelHotelId === "string" && raw.duffelHotelId.trim() ? raw.duffelHotelId.trim() : undefined);
       const summaryRaw = String((block as { summary?: string }).summary ?? "").trim() || undefined;
+      const recommendationsRaw = String((block as { recommendations?: string }).recommendations ?? "").trim() || undefined;
       return {
         id: String(block.id ?? uuidv4()),
         date: String(block.date ?? ""),
@@ -293,6 +322,7 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
         title: String(block.title ?? ""),
         ...(summaryRaw ? { summary: summaryRaw } : {}),
         description: String(block.description ?? ""),
+        ...(recommendationsRaw ? { recommendations: recommendationsRaw } : {}),
         ...(options?.length ? { bookingOptions: options } : {}),
         isBooked: Boolean((block as { isBooked?: boolean }).isBooked),
         bookedName: String((block as { bookedName?: string }).bookedName ?? "").trim() || undefined,
@@ -304,6 +334,17 @@ function parseTripResponse(data: unknown): ItineraryBlock[] {
           ? { price: (block as { price?: number }).price }
           : {}),
         ...(googlePlaceId ? { googlePlaceId } : {}),
+        ...(typeof (block as { lat?: number }).lat === "number" && Number.isFinite((block as { lat?: number }).lat) ? { lat: (block as { lat?: number }).lat } : {}),
+        ...(typeof (block as { lng?: number }).lng === "number" && Number.isFinite((block as { lng?: number }).lng) ? { lng: (block as { lng?: number }).lng } : {}),
+        ...((block as { priceNote?: string }).priceNote ? { priceNote: (block as { priceNote?: string }).priceNote } : {}),
+        ...((block as { rateKey?: string }).rateKey ? { rateKey: (block as { rateKey?: string }).rateKey } : {}),
+        ...((block as { rateType?: string }).rateType ? { rateType: (block as { rateType?: string }).rateType } : {}),
+        ...((block as { cancellationPolicy?: string | Record<string, unknown> }).cancellationPolicy != null ? { cancellationPolicy: (block as { cancellationPolicy?: string | Record<string, unknown> }).cancellationPolicy } : {}),
+        ...(Array.isArray((block as { cancellationPolicies?: unknown[] }).cancellationPolicies) && (block as { cancellationPolicies: unknown[] }).cancellationPolicies.length > 0 ? { cancellationPolicies: (block as { cancellationPolicies: unknown[] }).cancellationPolicies } : {}),
+        ...((block as { bookingStatus?: string }).bookingStatus ? { bookingStatus: (block as { bookingStatus?: string }).bookingStatus } : {}),
+        ...((block as { confirmationCode?: string }).confirmationCode ? { confirmationCode: (block as { confirmationCode?: string }).confirmationCode } : {}),
+        ...((block as { supplierName?: string }).supplierName ? { supplierName: (block as { supplierName?: string }).supplierName } : {}),
+        ...((block as { supplierVat?: string }).supplierVat ? { supplierVat: (block as { supplierVat?: string }).supplierVat } : {}),
       };
     });
   }
@@ -369,6 +410,15 @@ export default function Home() {
   const [timelineLinePositions, setTimelineLinePositions] = useState<
     Record<string, { top: number; height: number }>
   >({});
+
+  const activeBlocks = itineraryBlocks.filter((b) => b.isIncluded !== false);
+  const tripTotal = Math.round(
+    activeBlocks.reduce((sum, block) => sum + (Number(block.price) || 0), 0)
+  );
+  const totalBudget = activeBlocks.reduce((sum, block) => {
+    const cost = parseFloat(String(block.price ?? block.cost ?? 0));
+    return sum + (isNaN(cost) ? 0 : cost);
+  }, 0);
 
   const fetchSuggestions = useCallback(async (query: string) => {
     const q = query.trim();
@@ -1506,10 +1556,6 @@ export default function Home() {
           {activeView === "builder" && (() => {
             const activeBlocks = itineraryBlocks.filter((b) => b.isIncluded !== false);
             const discardedBlocks = itineraryBlocks.filter((b) => b.isIncluded === false);
-            const tripTotal = activeBlocks.reduce(
-              (sum, b) => sum + (typeof b.price === "number" && Number.isFinite(b.price) ? b.price : 0),
-              0
-            );
             return (
               <>
                 <ul className="space-y-4">
@@ -1627,7 +1673,7 @@ export default function Home() {
                             return (
                               <li
                                 key={`checkout-${source.id}`}
-                                className="relative flex items-center gap-3 pl-2"
+                                className="relative flex items-center justify-between gap-3 pl-2"
                               >
                                 {/* Dot on track (ref for green line end) */}
                                 <div
@@ -1637,16 +1683,16 @@ export default function Home() {
                                   className="absolute -left-8 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-white shadow-sm"
                                   aria-hidden
                                 />
-                              <span
-                                className={`inline-flex w-fit max-w-md items-center gap-2 rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass("accommodation")}`}
-                              >
-                                Check out: {title}
-                                {typeof source.price === "number" && source.price > 0 && (
-                                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
-                                    ${source.price.toLocaleString()}
+                                <span
+                                  className={`inline-flex w-fit max-w-md items-center gap-2 rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass("accommodation")}`}
+                                >
+                                  Check out: {title}
+                                </span>
+                                {source.price != null && (
+                                  <span className="shrink-0 font-semibold text-gray-700">
+                                    ${Math.round(Number(source.price))}
                                   </span>
                                 )}
-                              </span>
                               </li>
                             );
                           }
@@ -1663,7 +1709,7 @@ export default function Home() {
                               ? `Check in: ${displayName}`
                               : displayName;
                           return (
-                            <li key={block.id} className="relative flex items-center gap-3 pl-2">
+                            <li key={block.id} className="relative flex items-center justify-between gap-3 pl-2">
                               {/* Dot on track: ref for green line start when multi-day accommodation */}
                               <div
                                 ref={(el) => {
@@ -1681,18 +1727,26 @@ export default function Home() {
                                 className={`inline-flex w-fit max-w-md items-center gap-2 rounded-lg border py-2 px-4 shadow-sm ${timelineBlurbClass(block.type)}`}
                               >
                                 {blurbLabel}
-                                {typeof block.price === "number" && block.price > 0 && (
-                                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
-                                    ${block.price.toLocaleString()}
-                                  </span>
-                                )}
                               </span>
+                              {block.price != null && (
+                                <span className="shrink-0 font-semibold text-gray-700">
+                                  ${Math.round(Number(block.price))}
+                                </span>
+                              )}
                             </li>
                           );
                         })}
                       </ul>
                     </div>
                   ))}
+                  {groupBlocksByDateForTimeline(itineraryBlocks).length > 0 && (
+                    <div className="mt-8 pt-6 border-t border-gray-200 flex justify-end items-center">
+                      <div className="bg-white px-6 py-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
+                        <span className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Estimated Budget</span>
+                        <span className="text-2xl font-bold text-gray-900">${totalBudget.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
