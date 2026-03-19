@@ -16,16 +16,60 @@ type LiveHotelSearchProps = {
   value: string;
   onSelect: (hotel: HotelSearchResult) => void;
   placeholder?: string;
+  /** GET endpoint; `?query=` is appended. Default: hotel/lodging search. */
+  searchApiBasePath?: string;
+  /** Optional class for the search input (e.g. glass style) */
+  inputClassName?: string;
+  /** Optional class for the dropdown list container */
+  listClassName?: string;
+  /** Optional class for each list item */
+  listItemClassName?: string;
+  /** Optional class for the selected list item */
+  listItemSelectedClassName?: string;
+  /** Optional class for empty state message */
+  listEmptyClassName?: string;
+  /** Optional class for the hint line at bottom of list */
+  listHintClassName?: string;
+  /** Optional class for the loading spinner wrapper */
+  loaderClassName?: string;
+  /** Optional class for the location line inside each result item */
+  listItemLocationClassName?: string;
+  /** Optional class for the VIP/Fora badge inside each result item */
+  listItemBadgeClassName?: string;
 };
 
 function normalizePlaceholderTitle(v: string): string {
   return v === "Where to stay" || v === "Where to Stay" ? "" : v ?? "";
 }
 
+const defaultInputClass =
+  "mt-1 w-full rounded-lg border border-stone-200 bg-white py-2 pl-3 pr-10 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200";
+const defaultListClass =
+  "absolute z-50 w-full bg-white mt-1 max-h-60 overflow-auto rounded-lg border border-stone-200 py-1 shadow-lg ring-1 ring-black/5";
+const defaultItemClass =
+  "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm transition text-stone-800 hover:bg-stone-50";
+const defaultItemSelectedClass = "bg-amber-50 text-stone-900";
+const defaultEmptyClass = "px-3 py-2 text-sm text-stone-500";
+const defaultHintClass =
+  "px-3 py-2 text-sm text-stone-400 select-none pointer-events-none border-t border-stone-100 mt-1 pt-2";
+const defaultLoaderClass = "text-stone-400";
+
+const DEFAULT_SEARCH_API = "/api/hotels/search";
+
 export function LiveHotelSearch({
   value,
   onSelect,
+  searchApiBasePath = DEFAULT_SEARCH_API,
   placeholder = "Search our recommendations here...",
+  inputClassName = defaultInputClass,
+  listClassName = defaultListClass,
+  listItemClassName = defaultItemClass,
+  listItemSelectedClassName = defaultItemSelectedClass,
+  listEmptyClassName = defaultEmptyClass,
+  listHintClassName = defaultHintClass,
+  loaderClassName = defaultLoaderClass,
+  listItemLocationClassName = "text-stone-500",
+  listItemBadgeClassName = "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80",
 }: LiveHotelSearchProps) {
   const [inputValue, setInputValue] = useState(() => normalizePlaceholderTitle(value));
   const [results, setResults] = useState<HotelSearchResult[]>([]);
@@ -47,7 +91,7 @@ export function LiveHotelSearch({
     setIsSearching(true);
     try {
       const res = await fetch(
-        `/api/hotels/search?query=${encodeURIComponent(q)}`
+        `${searchApiBasePath}?query=${encodeURIComponent(q)}`
       );
       if (!res.ok) {
         setResults([]);
@@ -70,7 +114,7 @@ export function LiveHotelSearch({
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [searchApiBasePath]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -145,7 +189,7 @@ export function LiveHotelSearch({
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="mt-1 w-full rounded-lg border border-stone-200 bg-white py-2 pl-3 pr-10 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+          className={inputClassName}
           aria-expanded={isOpen}
           aria-autocomplete="list"
           aria-controls="hotel-search-results"
@@ -157,7 +201,7 @@ export function LiveHotelSearch({
         />
         {isSearching && (
           <span
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400"
+            className={`absolute right-3 top-1/2 -translate-y-1/2 ${loaderClassName}`}
             aria-hidden
           >
             <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />
@@ -168,10 +212,10 @@ export function LiveHotelSearch({
         <ul
           id="hotel-search-results"
           role="listbox"
-          className="absolute z-50 w-full bg-white mt-1 max-h-60 overflow-auto rounded-lg border border-stone-200 py-1 shadow-lg ring-1 ring-black/5"
+          className={listClassName}
         >
           {results.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-stone-500">
+            <li className={listEmptyClassName}>
               No hotels found. Keep typing.
             </li>
           ) : (
@@ -182,10 +226,8 @@ export function LiveHotelSearch({
                   id={`hotel-result-${i}`}
                   role="option"
                   aria-selected={selectedIndex === i}
-                  className={`flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm transition ${
-                    selectedIndex === i
-                      ? "bg-amber-50 text-stone-900"
-                      : "text-stone-800 hover:bg-stone-50"
+                  className={`${listItemClassName} ${
+                    selectedIndex === i ? listItemSelectedClassName : ""
                   }`}
                   onMouseEnter={() => setSelectedIndex(i)}
                   onClick={() => handleSelect(item)}
@@ -193,18 +235,18 @@ export function LiveHotelSearch({
                   <div className="min-w-0 flex-1">
                     <span className="block min-w-0 truncate">{item.name}</span>
                     {item.location ? (
-                      <span className="block min-w-0 truncate text-xs text-stone-500">{item.location}</span>
+                      <span className={`block min-w-0 truncate text-xs ${listItemLocationClassName}`}>{item.location}</span>
                     ) : null}
                   </div>
                   {item.isVIP && (
-                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80">
+                    <span className={listItemBadgeClassName}>
                       ✨ Fora Partner
                     </span>
                   )}
                 </li>
               ))}
               <li
-                className="px-3 py-2 text-sm text-stone-400 select-none pointer-events-none border-t border-stone-100 mt-1 pt-2"
+                className={listHintClassName}
                 aria-hidden
               >
                 🔍 Type a name to search all properties...

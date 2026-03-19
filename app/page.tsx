@@ -24,7 +24,19 @@ import {
   Layers,
   CalendarDays,
 } from "lucide-react";
+import {
+  DragDropContext,
+  Draggable,
+  Droppable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { ItineraryItemCard } from "./components/ItineraryItemCard";
+import type { ItineraryBlock } from "@/lib/itinerary-types";
+import {
+  coerceItineraryBlockFromUnknown,
+  blockLocationLabel,
+} from "@/lib/itinerary-types";
+import { AddCustomBlockWizardModal } from "./components/AddCustomBlockWizardModal";
 import { v4 as uuidv4 } from "uuid";
 
 type FormData = {
@@ -34,56 +46,6 @@ type FormData = {
   /** Number of travelers; may be empty string while user is typing */
   people: number | string;
   vibe: string;
-};
-
-type BookingOption = {
-  providerName: string;
-  url: string;
-  why: string;
-};
-
-type ItineraryBlock = {
-  id: string;
-  /** YYYY-MM-DD (start/check-in for accommodation) */
-  date: string;
-  /** YYYY-MM-DD optional end/check-out for accommodation or multi-day items */
-  endDate?: string;
-  /** City or area */
-  location: string;
-  type: "accommodation" | "activity" | "logistics";
-  title: string;
-  /** Teaser for card front (accommodation: 2 sentences; others: 3–5 word TLDR) */
-  summary?: string;
-  description: string;
-  /** For Accommodation blocks: exactly 3 options as "Hotel Name - Vibe" per line */
-  recommendations?: string;
-  bookingOptions?: BookingOption[];
-  /** Reservation capture (manual overwrite) */
-  isBooked?: boolean;
-  bookedName?: string;
-  confirmationNumber?: string;
-  cost?: string;
-  actualBookingUrl?: string;
-  /** Include in itinerary (curation); default false; only included blocks are saved */
-  isIncluded?: boolean;
-  /** Estimated price in dollars (saved to Supabase JSON) */
-  price?: number;
-  /** Google Place ID when user selects a hotel (for Accommodation blocks) */
-  googlePlaceId?: string;
-  /** Hotelbeds temporary rate identifier (Availability → CheckRate → Book flow) */
-  rateKey?: string;
-  /** Hotelbeds rate type: 'BOOKABLE' (direct book) or 'RECHECK' (must call CheckRate first) */
-  rateType?: string;
-  /** Cancellation policy from the rate (string or structured object) */
-  cancellationPolicy?: string | Record<string, unknown>;
-  /** APItude flow state: 'searched' | 'quoted' | 'booked' */
-  bookingStatus?: string;
-  /** Final booking reference from Hotelbeds after booking */
-  confirmationCode?: string;
-  /** Supplier name from booking (for voucher legal text) */
-  supplierName?: string;
-  /** Supplier VAT from booking (for voucher legal text) */
-  supplierVat?: string;
 };
 
 /** Timeline entry: either a real block or a synthetic "check-out" marker for multi-day items. */
@@ -115,11 +77,19 @@ function blocksForPersistence(blocks: ItineraryBlock[]): Record<string, unknown>
         : typeof raw.duffelHotelId === "string" && raw.duffelHotelId.trim()
           ? raw.duffelHotelId.trim()
           : undefined;
+    const geoFields =
+      block.type === "logistics"
+        ? {
+            startLocation: block.startLocation,
+            endLocation: block.endLocation,
+          }
+        : { location: block.location };
+
     return {
       id: block.id,
       date: block.date,
       ...(block.endDate ? { endDate: block.endDate } : {}),
-      location: block.location,
+      ...geoFields,
       type: block.type,
       title: block.title,
       ...(block.summary !== undefined && block.summary !== "" ? { summary: block.summary } : {}),
@@ -210,6 +180,102 @@ function formatCityLabel(r: GeocodingResult): string {
   return parts.join(", ");
 }
 
+/** Droppable id for itinerary items with no date (optional bucket when undated blocks exist). */
+const BUILDER_UNSCHEDULED_DROPPABLE = "__builder_unscheduled__";
+
+function addCalendarDaysIso(isoDate: string, deltaDays: number): string {
+  const t = new Date(isoDate + "T12:00:00");
+  t.setDate(t.getDate() + deltaDays);
+  const y = t.getFullYear();
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const d = String(t.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function enumerateTripDateStrings(start: string, end: string): string[] {
+  const s = (start || "").trim();
+  const e = (end || "").trim();
+  if (!s || !e || e < s) return [];
+  const out: string[] = [];
+  let cur = s;
+  while (cur <= e) {
+    out.push(cur);
+    cur = addCalendarDaysIso(cur, 1);
+  }
+  return out;
+}
+
+function droppableIdToBlockDate(droppableId: string): string {
+  return droppableId === BUILDER_UNSCHEDULED_DROPPABLE ? "" : droppableId;
+}
+
+function formatBuilderDayHeader(date: string, dayIndex: number): string {
+  const parsed = new Date(date + "T12:00:00");
+  if (Number.isNaN(parsed.getTime())) {
+    return `DAY ${dayIndex} • ${date.toUpperCase()}`;
+  }
+  const wd = parsed.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
+  const mon = parsed.toLocaleDateString("en-US", { month: "short" }).toUpperCase();
+  const n = parsed.getDate();
+  return `DAY ${dayIndex} • ${wd}, ${mon} ${n}`;
+}
+
+type BuilderDayBucket = {
+  droppableId: string;
+  date: string;
+  dayHeader: string;
+  blocks: ItineraryBlock[];
+};
+
+/** Day buckets for Builder: trip date range ∪ block dates; unscheduled only if needed. Preserves within-day order from `activeBlocks`. */
+function getBuilderDayBuckets(
+  activeBlocks: ItineraryBlock[],
+  tripStart: string,
+  tripEnd: string
+): BuilderDayBucket[] {
+  const tripDays = enumerateTripDateStrings(tripStart, tripEnd);
+  const dateSet = new Set<string>(tripDays);
+  for (const b of activeBlocks) {
+    const d = (b.date || "").trim();
+    if (d) dateSet.add(d);
+  }
+  const orderedDates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+  const byDay = new Map<string, ItineraryBlock[]>();
+  for (const d of orderedDates) byDay.set(d, []);
+
+  const unscheduled: ItineraryBlock[] = [];
+  for (const block of activeBlocks) {
+    const d = (block.date || "").trim();
+    if (d === "") {
+      unscheduled.push(block);
+      continue;
+    }
+    byDay.get(d)!.push(block);
+  }
+  const buckets: BuilderDayBucket[] = [];
+
+  if (unscheduled.length > 0) {
+    buckets.push({
+      droppableId: BUILDER_UNSCHEDULED_DROPPABLE,
+      date: "",
+      dayHeader: "UNSCHEDULED",
+      blocks: unscheduled,
+    });
+  }
+
+  let dayIdx = 0;
+  for (const d of orderedDates) {
+    buckets.push({
+      droppableId: d,
+      date: d,
+      dayHeader: formatBuilderDayHeader(d, ++dayIdx),
+      blocks: byDay.get(d) ?? [],
+    });
+  }
+
+  return buckets;
+}
+
 /** Sort blocks by date and group by date for timeline view. Returns array of { date, dayLabel, dayIndex, blocks }. */
 function groupBlocksByDate(blocks: ItineraryBlock[]): {
   date: string;
@@ -295,58 +361,9 @@ function groupBlocksByDateForTimeline(blocks: ItineraryBlock[]): {
 
 function parseTripResponse(data: unknown): ItineraryBlock[] {
   if (Array.isArray(data)) {
-    return data.map((b) => {
-      const block = b as ItineraryBlock & { bookingOptions?: BookingOption[] };
-      const options = Array.isArray(block.bookingOptions)
-        ? block.bookingOptions.filter(
-            (o) =>
-              typeof o?.providerName === "string" &&
-              typeof o?.url === "string" &&
-              typeof o?.why === "string"
-          )
-        : undefined;
-      const endDateRaw = String((block as { endDate?: string }).endDate ?? (block as { checkOutDate?: string }).checkOutDate ?? "").trim() || undefined;
-      const raw = block as { googlePlaceId?: string; duffelHotelId?: string };
-      const googlePlaceId = typeof raw.googlePlaceId === "string" && raw.googlePlaceId.trim() ? raw.googlePlaceId.trim() : (typeof raw.duffelHotelId === "string" && raw.duffelHotelId.trim() ? raw.duffelHotelId.trim() : undefined);
-      const summaryRaw = String((block as { summary?: string }).summary ?? "").trim() || undefined;
-      const recommendationsRaw = String((block as { recommendations?: string }).recommendations ?? "").trim() || undefined;
-      return {
-        id: String(block.id ?? uuidv4()),
-        date: String(block.date ?? ""),
-        ...(endDateRaw ? { endDate: endDateRaw } : {}),
-        location: String(block.location ?? ""),
-        type:
-          block.type === "accommodation" || block.type === "logistics"
-            ? block.type
-            : "activity",
-        title: String(block.title ?? ""),
-        ...(summaryRaw ? { summary: summaryRaw } : {}),
-        description: String(block.description ?? ""),
-        ...(recommendationsRaw ? { recommendations: recommendationsRaw } : {}),
-        ...(options?.length ? { bookingOptions: options } : {}),
-        isBooked: Boolean((block as { isBooked?: boolean }).isBooked),
-        bookedName: String((block as { bookedName?: string }).bookedName ?? "").trim() || undefined,
-        confirmationNumber: String((block as { confirmationNumber?: string }).confirmationNumber ?? "").trim() || undefined,
-        cost: String((block as { cost?: string }).cost ?? "").trim() || undefined,
-        actualBookingUrl: String((block as { actualBookingUrl?: string }).actualBookingUrl ?? "").trim() || undefined,
-        isIncluded: (block as { isIncluded?: boolean }).isIncluded !== false,
-        ...(typeof (block as { price?: number }).price === "number" && Number.isFinite((block as { price?: number }).price)
-          ? { price: (block as { price?: number }).price }
-          : {}),
-        ...(googlePlaceId ? { googlePlaceId } : {}),
-        ...(typeof (block as { lat?: number }).lat === "number" && Number.isFinite((block as { lat?: number }).lat) ? { lat: (block as { lat?: number }).lat } : {}),
-        ...(typeof (block as { lng?: number }).lng === "number" && Number.isFinite((block as { lng?: number }).lng) ? { lng: (block as { lng?: number }).lng } : {}),
-        ...((block as any).priceNote ? { priceNote: (block as any).priceNote } : {}),
-        ...((block as any).rateKey ? { rateKey: (block as any).rateKey } : {}),
-        ...((block as any).rateType ? { rateType: (block as any).rateType } : {}),
-        ...((block as any).cancellationPolicy != null ? { cancellationPolicy: (block as any).cancellationPolicy } : {}),
-        ...(Array.isArray((block as any).cancellationPolicies) && (block as any).cancellationPolicies.length > 0 ? { cancellationPolicies: (block as any).cancellationPolicies } : {}),
-        ...((block as any).bookingStatus ? { bookingStatus: (block as any).bookingStatus } : {}),
-        ...((block as any).confirmationCode ? { confirmationCode: (block as any).confirmationCode } : {}),
-        ...((block as any).supplierName ? { supplierName: (block as any).supplierName } : {}),
-        ...((block as any).supplierVat ? { supplierVat: (block as any).supplierVat } : {}),
-      };
-    });
+    return data.map((b) =>
+      coerceItineraryBlockFromUnknown(b as Record<string, unknown>, () => uuidv4())
+    );
   }
   if (
     data &&
@@ -384,6 +401,7 @@ export default function Home() {
   /** Trip concierge status from Supabase (defaults to 'draft'). */
   const [tripStatus, setTripStatus] = useState<"draft" | "quote_requested" | "booked">("draft");
   const [showRequestBookingModal, setShowRequestBookingModal] = useState(false);
+  const [showAddBlockWizard, setShowAddBlockWizard] = useState(false);
 
   // Auth
   const [user, setUser] = useState<any>(null);
@@ -629,6 +647,54 @@ export default function Home() {
     );
   };
 
+  const handleBuilderDragEnd = useCallback(
+    (result: DropResult) => {
+      const { destination, source, draggableId } = result;
+      if (!destination) return;
+      if (
+        destination.droppableId === source.droppableId &&
+        destination.index === source.index
+      ) {
+        return;
+      }
+
+      setItineraryBlocks((prev) => {
+        const discarded = prev.filter((b) => b.isIncluded === false);
+        const active = prev.filter((b) => b.isIncluded !== false);
+
+        const bucketModels = getBuilderDayBuckets(
+          active,
+          formData.startDate,
+          formData.endDate
+        );
+        const buckets = bucketModels.map((b) => ({
+          ...b,
+          blocks: [...b.blocks],
+        }));
+
+        const sourceBucket = buckets.find((b) => b.droppableId === source.droppableId);
+        const destBucket = buckets.find((b) => b.droppableId === destination.droppableId);
+        if (!sourceBucket || !destBucket) return prev;
+
+        const sourceList = sourceBucket.blocks;
+        const [moved] = sourceList.splice(source.index, 1);
+        if (!moved || moved.id !== draggableId) return prev;
+
+        const destDate = droppableIdToBlockDate(destination.droppableId);
+        const updated =
+          source.droppableId === destination.droppableId
+            ? moved
+            : { ...moved, date: destDate };
+
+        destBucket.blocks.splice(destination.index, 0, updated);
+
+        const newActive = buckets.flatMap((b) => b.blocks);
+        return [...newActive, ...discarded];
+      });
+    },
+    [formData.startDate, formData.endDate]
+  );
+
   const deleteBlock = (id: string) => {
     setItineraryBlocks((prev) => prev.filter((b) => b.id !== id));
   };
@@ -650,7 +716,7 @@ export default function Home() {
         body: JSON.stringify({
           type: blockData.type,
           title: blockData.title,
-          location: blockData.location,
+          location: blockLocationLabel(blockData),
           description: blockData.description,
         }),
       });
@@ -670,21 +736,8 @@ export default function Home() {
     }
   };
 
-  const addCustomBlock = () => {
-    setItineraryBlocks((prev) => [
-      ...prev,
-      {
-        id: uuidv4(),
-        date: "",
-        location: "",
-        type: "activity",
-        title: "Custom block",
-        description: "Add your own plans here.",
-        bookingOptions: undefined,
-        isBooked: false,
-        isIncluded: true,
-      },
-    ]);
+  const handleAddBlockFromWizard = (block: ItineraryBlock) => {
+    setItineraryBlocks((prev) => [...prev, block]);
   };
 
   const handleSaveTrip = async () => {
@@ -815,9 +868,13 @@ export default function Home() {
   };
 
   const primaryDisabledClass =
-    "cursor-not-allowed bg-stone-300 text-stone-500 shadow-none hover:bg-stone-300 hover:shadow-none active:scale-100";
+    isFounderVip === true
+      ? "cursor-not-allowed bg-white/20 text-white/50 shadow-none hover:bg-white/20 hover:shadow-none active:scale-100"
+      : "cursor-not-allowed bg-stone-300 text-stone-500 shadow-none hover:bg-stone-300 hover:shadow-none active:scale-100";
   const primaryEnabledClass =
-    "bg-stone-900 text-white shadow-lg shadow-stone-900/15 hover:bg-stone-800 hover:shadow-xl active:scale-[0.98]";
+    isFounderVip === true
+      ? "bg-white text-twizz-charcoal shadow-lg shadow-black/10 hover:bg-twizz-vip-text-muted hover:shadow-xl transition-colors duration-200 active:scale-[0.98]"
+      : "bg-twizz-charcoal text-white shadow-lg shadow-stone-900/15 hover:bg-stone-800 hover:shadow-xl transition-colors duration-200 active:scale-[0.98]";
 
   const typeBadgeClass = (type: ItineraryBlock["type"]) => {
     switch (type) {
@@ -878,7 +935,7 @@ export default function Home() {
         status === "quote_requested" || status === "booked" ? status : "draft"
       );
       // Restore form data for header (destination, dates) — always set from loaded trip so header updates when switching trips
-      const firstLoc = blocks[0]?.location?.trim();
+      const firstLoc = blocks[0] ? blockLocationLabel(blocks[0]).trim() : "";
       const headerDestination = firstLoc || name || undefined;
       setFormData((prev) => ({
         ...prev,
@@ -1027,41 +1084,30 @@ export default function Home() {
 
   // ——— Global top nav ———
   const topNav = (
-    <header className="sticky top-0 z-30 border-b border-stone-200 bg-white">
+    <header
+      className={`sticky top-0 z-30 border-b backdrop-blur-md transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] ${
+        isFounderVip === true
+          ? "border-white/10 bg-twizz-aubergine/70"
+          : "border-stone-200/80 bg-twizz-pearl/80"
+      }`}
+    >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={handleNewTrip}
-            className="text-lg font-semibold tracking-tight text-stone-900 transition hover:text-stone-600"
+            className={`text-lg font-semibold tracking-tight transition-colors duration-200 hover:opacity-90 ${
+              isFounderVip === true ? "text-white" : "text-twizz-charcoal"
+            }`}
           >
             Twizz
           </button>
-          {isFounderVip === true && (
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-600 text-white shadow-sm"
-              title="Twizz Founder VIP"
-              aria-label="Twizz Founder VIP"
-            >
-              <Crown className="h-4 w-4" strokeWidth={2} />
-            </span>
-          )}
         </div>
         <nav className="relative flex items-center gap-2">
-          {tripStatus === "draft" && (
-            <button
-              type="button"
-              onClick={() => setShowRequestBookingModal(true)}
-              className="rounded-md bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white transition-colors hover:bg-gray-800"
-              aria-label="Request VIP booking"
-            >
-              VIP
-            </button>
-          )}
           {isFounderVip === true && (
             <Link
               href="/feedback"
-              className="flex h-9 items-center justify-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm font-medium text-purple-800 shadow-sm transition hover:bg-purple-100 hover:border-purple-300"
+              className="flex h-9 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-white/20"
             >
               <MessageSquare className="h-4 w-4 shrink-0" strokeWidth={2} />
               Beta Feedback
@@ -1070,7 +1116,11 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setIsMenuOpen((o) => !o)}
-            className="flex h-9 items-center justify-center gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50 hover:border-stone-300"
+            className={`flex h-9 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium shadow-sm transition-colors duration-200 ${
+              isFounderVip === true
+                ? "border-white/20 bg-white/10 text-white hover:bg-white/20"
+                : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50 hover:border-stone-300"
+            }`}
             aria-expanded={isMenuOpen}
             aria-haspopup="true"
           >
@@ -1085,7 +1135,11 @@ export default function Home() {
                 onClick={() => setIsMenuOpen(false)}
               />
               <div
-                className="absolute right-0 top-full z-50 mt-2 w-48 rounded-md border border-stone-200 bg-white py-1 shadow-lg"
+                className={`absolute right-0 top-full z-50 mt-2 w-48 rounded-md border py-1 shadow-lg ${
+                  isFounderVip === true
+                    ? "border-white/20 bg-twizz-aubergine-surface text-white"
+                    : "border-stone-200 bg-white"
+                }`}
                 role="menu"
               >
                 <button
@@ -1095,7 +1149,9 @@ export default function Home() {
                     handleNewTrip();
                     setIsMenuOpen(false);
                   }}
-                  className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                  className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                    isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
+                  }`}
                 >
                   New Trip
                 </button>
@@ -1108,7 +1164,9 @@ export default function Home() {
                         setViewMode("dashboard");
                         setIsMenuOpen(false);
                       }}
-                      className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                      className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                        isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
+                      }`}
                     >
                       My Trips
                     </button>
@@ -1119,7 +1177,9 @@ export default function Home() {
                         supabase?.auth.signOut();
                         setIsMenuOpen(false);
                       }}
-                      className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                      className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                        isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
+                      }`}
                     >
                       Sign Out
                     </button>
@@ -1132,7 +1192,9 @@ export default function Home() {
                       setShowAuthModal(true);
                       setIsMenuOpen(false);
                     }}
-                    className="w-full px-4 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100"
+                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                      isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
+                    }`}
                   >
                     Sign In
                   </button>
@@ -1148,7 +1210,7 @@ export default function Home() {
   // ——— Auth Modal ———
   const authModal = showAuthModal && (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
       aria-modal="true"
       role="dialog"
       aria-labelledby="auth-modal-title"
@@ -1215,7 +1277,7 @@ export default function Home() {
               onChange={(e) => setAuthEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 text-gray-100 placeholder:text-gray-400"
             />
           </label>
           <label className="block">
@@ -1228,7 +1290,7 @@ export default function Home() {
               onChange={(e) => setAuthPassword(e.target.value)}
               required
               autoComplete={authMode === "signin" ? "current-password" : "new-password"}
-              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 text-gray-100 placeholder:text-gray-400"
             />
           </label>
           {authError && (
@@ -1259,7 +1321,10 @@ export default function Home() {
   // ——— Dashboard View ———
   if (viewMode === "dashboard") {
     return (
-      <div className={`min-h-screen overflow-x-hidden ${isFounderVip === true ? "bg-purple-100" : "bg-[#f8f8f6]"} text-stone-900 antialiased`}>
+      <div
+        className={`min-h-screen overflow-x-hidden transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
+        data-theme={isFounderVip === true ? "vip" : undefined}
+      >
         {authModal}
         {topNav}
         <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
@@ -1377,25 +1442,52 @@ export default function Home() {
   // ——— Builder View (itinerary drag-drop) ———
   if (viewMode === "builder") {
     return (
-      <div className={`min-h-screen ${isFounderVip === true ? "bg-purple-100" : "bg-[#f5f4f1]"} text-stone-900 antialiased`}>
+      <div
+        className={`min-h-screen transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
+        data-theme={isFounderVip === true ? "vip" : undefined}
+      >
         {authModal}
         {topNav}
         <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-          <header className="mb-6 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+          <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
                 Your itinerary
               </p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
+              <h1 className={`mt-1 text-2xl font-semibold tracking-tight ${isFounderVip === true ? "text-white" : "text-stone-900"}`}>
                 {formData.destination}
               </h1>
               {formData.startDate && (
-                <p className="mt-1 text-sm text-stone-500">
+                <p className={`mt-1 text-sm ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
                   {formData.startDate} – {formData.endDate} ·{" "}
                   {Number(formData.people) >= 1 ? Number(formData.people) : "—"}{" "}
                   {Number(formData.people) === 1 ? "guest" : "guests"}
                 </p>
               )}
+            </div>
+            <div className="flex shrink-0 items-center" aria-label="Estimated trip budget">
+              <div
+                className={`inline-flex items-center justify-between gap-3 rounded-2xl px-4 py-2.5 shadow-sm sm:gap-4 sm:px-5 ${
+                  isFounderVip === true
+                    ? "border border-white/15 bg-white/10 backdrop-blur-sm"
+                    : "border border-stone-200/90 bg-white/95 backdrop-blur-sm ring-1 ring-stone-200/50"
+                }`}
+              >
+                <span
+                  className={`text-[11px] font-semibold uppercase tracking-[0.18em] sm:text-xs ${
+                    isFounderVip === true ? "text-white/80" : "text-stone-500"
+                  }`}
+                >
+                  Est. budget
+                </span>
+                <span
+                  className={`font-bold tabular-nums tracking-tight sm:text-lg ${
+                    isFounderVip === true ? "text-white" : "text-stone-900"
+                  }`}
+                >
+                  ${totalBudget.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
             </div>
             <button
               type="button"
@@ -1405,17 +1497,25 @@ export default function Home() {
                 setCurrentTripId(null);
                 setTripStatus("draft");
               }}
-              className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-600 shadow-sm transition hover:bg-stone-50"
+              className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
+                isFounderVip === true
+                  ? "border border-white/20 bg-white/10 text-white hover:bg-white/20"
+                  : "border border-stone-200 bg-white text-stone-600 shadow-sm hover:bg-stone-50"
+              }`}
             >
               Edit trip
             </button>
           </header>
 
-          {/* Sticky workspace header: trip name + concierge CTA + save (below global nav h-14) */}
-          <div className={`sticky top-14 z-10 -mx-4 mb-6 border-b border-stone-200/80 px-4 py-4 backdrop-blur-sm sm:-mx-6 sm:px-6 ${isFounderVip === true ? "bg-purple-100/95" : "bg-[#f5f4f1]/95"}`}>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          {/* Sticky workspace header: floating dock — trip name + Save Trip; frosted glass, rounded */}
+          <header
+            className={`sticky top-4 z-40 mx-4 mt-4 mb-6 rounded-2xl p-3 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] sm:mx-auto sm:max-w-screen-xl ${
+              isFounderVip === true ? "bg-twizz-aubergine/80" : "bg-twizz-pearl/80"
+            }`}
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
               <label className="min-w-0 flex-1">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                <span className={`mb-1 block text-xs font-semibold uppercase tracking-wider ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
                   Trip name
                 </span>
                 <input
@@ -1423,16 +1523,14 @@ export default function Home() {
                   value={tripName}
                   onChange={(e) => setTripName(e.target.value)}
                   placeholder={`My ${formData.destination.trim() || "Destination"} Trip`}
-                  className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-base font-medium text-stone-900 shadow-sm placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                  className={`h-12 w-full rounded-xl px-4 text-base font-medium shadow-sm focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 ${
+                    isFounderVip === true
+                      ? "bg-white/10 border border-white/20 text-white placeholder:text-gray-400 focus:border-white/30 focus:ring-0"
+                      : "border border-stone-200 bg-white text-gray-900 placeholder:text-gray-500 focus:border-stone-400 focus:ring-stone-200"
+                  }`}
                 />
               </label>
               <div className="flex shrink-0 flex-col items-end gap-2">
-                {tripStatus === "quote_requested" && (
-                  <span className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-500">
-                    <Sparkles className="h-4 w-4 text-stone-400" strokeWidth={1.5} aria-hidden />
-                    Quote Requested — Advisor Reviewing
-                  </span>
-                )}
                 {tripStatus === "booked" && (
                   <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
                     <CheckCircle className="h-4 w-4 text-emerald-600" strokeWidth={2} aria-hidden />
@@ -1444,13 +1542,15 @@ export default function Home() {
                     type="button"
                     onClick={() => void handleSaveTrip()}
                     disabled={isSaving}
-                    className={`rounded-xl px-6 py-3 text-base font-semibold shadow-lg shadow-stone-900/15 transition active:scale-[0.98] ${
+                    className={`flex h-12 items-center justify-center rounded-xl px-6 text-base font-semibold transition-all active:scale-[0.98] ${
                       isSaving
                         ? "cursor-wait bg-stone-600 text-white"
                         : saveJustSucceeded
                           ? "bg-emerald-600 text-white hover:bg-emerald-600"
-                          : "bg-stone-900 text-white hover:bg-stone-800"
-                    } disabled:opacity-90`}
+                          : isFounderVip === true
+                            ? "border border-purple-400/30 bg-purple-500/20 text-white shadow-lg shadow-stone-900/15 hover:bg-purple-500/30 disabled:opacity-90"
+                            : "border border-transparent bg-stone-900 text-white shadow-lg shadow-stone-900/15 hover:bg-stone-800 disabled:opacity-90"
+                    }`}
                   >
                     <span className="inline-flex items-center justify-center gap-2">
                       {isSaving && (
@@ -1469,9 +1569,26 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </div>
+          </header>
 
           {/* Request VIP Booking modal */}
+          <AddCustomBlockWizardModal
+            open={showAddBlockWizard}
+            onClose={() => setShowAddBlockWizard(false)}
+            tripStartDate={formData.startDate}
+            tripEndDate={formData.endDate}
+            defaultLocation={formData.destination.trim()}
+            tripContext={{
+              destination: formData.destination.trim(),
+              people: Number(formData.people) || 2,
+              vibe:
+                typeof formData.vibe === "string"
+                  ? formData.vibe.trim()
+                  : String(formData.vibe ?? "").trim(),
+            }}
+            onAddToItinerary={handleAddBlockFromWizard}
+          />
+
           {showRequestBookingModal && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm"
@@ -1556,28 +1673,73 @@ export default function Home() {
           {activeView === "builder" && (() => {
             const activeBlocks = itineraryBlocks.filter((b) => b.isIncluded !== false);
             const discardedBlocks = itineraryBlocks.filter((b) => b.isIncluded === false);
+            const dayBuckets = getBuilderDayBuckets(
+              activeBlocks,
+              formData.startDate,
+              formData.endDate
+            );
+            const bucketDividerClass =
+              isFounderVip === true
+                ? "border-t border-white/10 mt-8 pt-8"
+                : "border-t border-stone-200/80 mt-8 pt-8";
+            const dayHeaderClass = `text-sm font-medium uppercase tracking-widest ${
+              isFounderVip === true ? "text-gray-400" : "text-stone-500"
+            }`;
+
             return (
               <>
-                <ul className="space-y-4">
-                  {activeBlocks.map((block) => (
-                    <ItineraryItemCard
-                      key={block.id}
-                      block={block}
-                      dragHandleProps={null}
-                      updateBlock={updateBlock}
-                      deleteBlock={deleteBlock}
-                      toggleIncludeInItinerary={toggleIncludeInItinerary}
-                      typeBadgeClass={typeBadgeClass}
-                    />
-                  ))}
-                </ul>
+                <DragDropContext onDragEnd={handleBuilderDragEnd}>
+                  <div>
+                    {dayBuckets.map((bucket, bucketIndex) => (
+                      <div
+                        key={bucket.droppableId}
+                        className={bucketIndex > 0 ? bucketDividerClass : ""}
+                      >
+                        <h2 className={`${dayHeaderClass} select-none`}>{bucket.dayHeader}</h2>
+                        <Droppable droppableId={bucket.droppableId}>
+                          {(dropProvided) => (
+                            <ul
+                              ref={dropProvided.innerRef}
+                              {...dropProvided.droppableProps}
+                              className="mt-4 space-y-4"
+                            >
+                              {bucket.blocks.map((block, index) => (
+                                <Draggable key={block.id} draggableId={block.id} index={index}>
+                                  {(dragProvided, snapshot) => (
+                                    <ItineraryItemCard
+                                      block={block}
+                                      isFounderVip={isFounderVip}
+                                      dragHandleProps={dragProvided.dragHandleProps}
+                                      dragInnerRef={dragProvided.innerRef}
+                                      dragDraggableProps={dragProvided.draggableProps}
+                                      snapshot={snapshot}
+                                      updateBlock={updateBlock}
+                                      deleteBlock={deleteBlock}
+                                      toggleIncludeInItinerary={toggleIncludeInItinerary}
+                                      typeBadgeClass={typeBadgeClass}
+                                    />
+                                  )}
+                                </Draggable>
+                              ))}
+                              {dropProvided.placeholder}
+                            </ul>
+                          )}
+                        </Droppable>
+                      </div>
+                    ))}
+                  </div>
+                </DragDropContext>
 
                 <button
                   type="button"
-                  onClick={addCustomBlock}
-                  className="mt-6 w-full rounded-2xl border border-dashed border-stone-300 bg-white/60 py-4 text-sm font-medium text-stone-600 shadow-sm transition hover:border-stone-400 hover:bg-white hover:text-stone-900"
+                  onClick={() => setShowAddBlockWizard(true)}
+                  className={`mt-6 w-full rounded-2xl border border-dashed py-4 text-sm font-medium shadow-sm transition ${
+                    isFounderVip === true
+                      ? "border-white/25 bg-white/5 text-white/80 backdrop-blur-sm hover:border-white/40 hover:bg-white/10 hover:text-white"
+                      : "border-stone-300 bg-white/60 text-stone-600 hover:border-stone-400 hover:bg-white hover:text-stone-900"
+                  }`}
                 >
-                  + Add custom block
+                  Add block to itinerary
                 </button>
 
                 <hr className="my-8 border-gray-300" />
@@ -1589,6 +1751,7 @@ export default function Home() {
                         <ItineraryItemCard
                           key={block.id}
                           block={block}
+                          isFounderVip={isFounderVip}
                           dragHandleProps={null}
                           updateBlock={updateBlock}
                           deleteBlock={deleteBlock}
@@ -1623,11 +1786,13 @@ export default function Home() {
           {activeView === "timeline" && (
             <div
               ref={timelineContainerRef}
-              className="relative border-l-2 border-stone-200 pl-8"
+              className="relative border-l-2 border-stone-200 pl-10 sm:pl-12 transition-all duration-300 ease-[var(--twizz-transition-ease)]"
             >
               {groupBlocksByDateForTimeline(itineraryBlocks).length === 0 ? (
-                <div className="py-12 text-center text-sm text-stone-500">
-                  Add items with dates in Builder to see your timeline.
+                <div className="py-16 text-center">
+                  <p className="text-sm font-medium text-stone-500">
+                    Add items with dates in Builder to see your timeline.
+                  </p>
                 </div>
               ) : (
                 <>
@@ -1638,7 +1803,7 @@ export default function Home() {
                     return (
                       <div
                         key={`line-${block.id}`}
-                        className="pointer-events-none absolute left-0 w-0.5 rounded-full bg-green-400"
+                        className="pointer-events-none absolute left-0 w-0.5 rounded-full bg-green-400 transition-opacity duration-300"
                         style={{
                           top: pos.top,
                           height: pos.height,
@@ -1649,16 +1814,19 @@ export default function Home() {
                     );
                   })}
                   {groupBlocksByDateForTimeline(itineraryBlocks).map((group) => (
-                    <div key={group.date} className="relative pb-10 last:pb-0">
+                    <div key={group.date} className="relative pb-14 last:pb-0 transition-all duration-300 ease-[var(--twizz-transition-ease)]">
                       {/* Day header dot on track */}
                       <div
-                        className="absolute -left-8 top-0.5 h-3 w-3 -translate-x-1/2 rounded-full border-2 border-white bg-stone-900 shadow-sm"
+                        className="absolute -left-10 sm:-left-12 top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-white bg-stone-900 shadow-md shadow-stone-300/50"
                         aria-hidden
                       />
-                      <h2 className="text-sm font-semibold uppercase tracking-wider text-stone-500">
-                        Day {group.dayIndex}: {group.dayLabel}
+                      <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">
+                        Day {group.dayIndex}
                       </h2>
-                      <ul className="mt-4 space-y-3">
+                      <p className="mt-0.5 text-base font-medium tracking-tight text-stone-900">
+                        {group.dayLabel}
+                      </p>
+                      <ul className="mt-6 space-y-4">
                         {group.blocks.map((entry) => {
                           const isCheckout =
                             typeof entry === "object" &&
@@ -1673,14 +1841,14 @@ export default function Home() {
                             return (
                               <li
                                 key={`checkout-${source.id}`}
-                                className="relative flex items-center justify-between gap-3 pl-2"
+                                className="relative flex items-center justify-between gap-3 pl-3 transition-opacity duration-200"
                               >
                                 {/* Dot on track (ref for green line end) */}
                                 <div
                                   ref={(el) => {
                                     timelineLineEndRefs.current[source.id] = el;
                                   }}
-                                  className="absolute -left-8 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-white shadow-sm"
+                                  className="absolute -left-10 sm:-left-12 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-white shadow-sm"
                                   aria-hidden
                                 />
                                 <span
@@ -1689,7 +1857,7 @@ export default function Home() {
                                   Check out: {title}
                                 </span>
                                 {source.price != null && (
-                                  <span className="shrink-0 font-semibold text-gray-700">
+                                  <span className="shrink-0 font-semibold text-stone-700">
                                     ${Math.round(Number(source.price))}
                                   </span>
                                 )}
@@ -1709,14 +1877,14 @@ export default function Home() {
                               ? `Check in: ${displayName}`
                               : displayName;
                           return (
-                            <li key={block.id} className="relative flex items-center justify-between gap-3 pl-2">
+                            <li key={block.id} className="relative flex items-center justify-between gap-3 pl-3 transition-opacity duration-200">
                               {/* Dot on track: ref for green line start when multi-day accommodation */}
                               <div
                                 ref={(el) => {
                                   if (isMultiDay)
                                     timelineLineStartRefs.current[block.id] = el;
                                 }}
-                                className={`absolute -left-8 top-5 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-white shadow-sm ${
+                                className={`absolute -left-10 sm:-left-12 top-5 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-white shadow-sm ${
                                   isMultiDay && isAccommodation
                                     ? "bg-green-500"
                                     : "bg-stone-400"
@@ -1729,7 +1897,7 @@ export default function Home() {
                                 {blurbLabel}
                               </span>
                               {block.price != null && (
-                                <span className="shrink-0 font-semibold text-gray-700">
+                                <span className="shrink-0 font-semibold text-stone-700">
                                   ${Math.round(Number(block.price))}
                                 </span>
                               )}
@@ -1739,14 +1907,6 @@ export default function Home() {
                       </ul>
                     </div>
                   ))}
-                  {groupBlocksByDateForTimeline(itineraryBlocks).length > 0 && (
-                    <div className="mt-8 pt-6 border-t border-gray-200 flex justify-end items-center">
-                      <div className="bg-white px-6 py-4 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
-                        <span className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Estimated Budget</span>
-                        <span className="text-2xl font-bold text-gray-900">${totalBudget.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      </div>
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -1758,7 +1918,10 @@ export default function Home() {
 
   // ——— Wizard (multi-step form) ———
   return (
-    <div className={`min-h-screen ${isFounderVip === true ? "bg-purple-100" : "bg-[#fafaf9]"} text-stone-900 antialiased`}>
+    <div
+      className={`min-h-screen transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
+      data-theme={isFounderVip === true ? "vip" : undefined}
+    >
       {authModal}
       {topNav}
       <div className="flex min-h-screen flex-col pt-4">
@@ -1779,10 +1942,16 @@ export default function Home() {
                 key={i}
                 className={`h-1.5 rounded-full transition-all duration-500 ease-out ${
                   i + 1 === step
-                    ? "w-8 bg-stone-900"
+                    ? isFounderVip === true
+                      ? "w-8 bg-white"
+                      : "w-8 bg-twizz-charcoal"
                     : i + 1 < step
-                      ? "w-1.5 bg-stone-400"
-                      : "w-1.5 bg-stone-200"
+                      ? isFounderVip === true
+                        ? "w-1.5 bg-white/60"
+                        : "w-1.5 bg-stone-400"
+                      : isFounderVip === true
+                        ? "w-1.5 bg-white/20"
+                        : "w-1.5 bg-stone-200"
                 }`}
                 aria-hidden
               />
@@ -1802,12 +1971,18 @@ export default function Home() {
               aria-hidden={step !== 1}
             >
               <div className="flex flex-col items-center text-center">
-                <h1 className="mb-12 text-pretty text-3xl font-medium tracking-tight text-stone-900 sm:text-4xl lg:text-5xl">
+                <h1
+                  className={`mb-12 text-pretty text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl ${
+                    isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
+                  }`}
+                >
                   Where do you want to escape to?
                 </h1>
                 <div ref={dropdownContainerRef} className="relative w-full">
                   <MapPin
-                    className="pointer-events-none absolute left-0 top-1/2 z-10 h-6 w-6 -translate-y-1/2 text-stone-400 sm:left-1"
+                    className={`pointer-events-none absolute left-0 top-1/2 z-10 h-6 w-6 -translate-y-1/2 sm:left-1 ${
+                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
+                    }`}
                     strokeWidth={1.5}
                     aria-hidden
                   />
@@ -1841,7 +2016,11 @@ export default function Home() {
                       }
                     }}
                     placeholder="City, region, or country"
-                    className="relative z-0 w-full border-0 border-b-2 border-stone-200 bg-transparent py-4 pl-10 pr-2 text-left text-xl text-stone-900 placeholder:text-stone-400 focus:border-stone-900 focus:outline-none sm:pl-12 sm:text-2xl"
+                    className={`relative z-0 w-full border-0 border-b-2 bg-transparent py-4 pl-10 pr-2 text-left text-xl focus:outline-none sm:pl-12 sm:text-2xl text-gray-100 placeholder:text-gray-400 ${
+                      isFounderVip === true
+                        ? "border-white/20 text-white placeholder:text-gray-400 focus:border-white"
+                        : "border-stone-200 text-twizz-charcoal placeholder:text-twizz-charcoal-subtle focus:border-twizz-charcoal"
+                    }`}
                     autoFocus={step === 1}
                     aria-invalid={!step1Valid}
                     aria-describedby={!step1Valid ? "step1-hint" : undefined}
@@ -1852,10 +2031,18 @@ export default function Home() {
                       <ul
                         id="destination-suggestions"
                         role="listbox"
-                        className="absolute left-0 right-0 top-full z-20 mt-2 max-h-64 overflow-auto rounded-2xl border border-stone-100 bg-white py-2 shadow-lg shadow-stone-200/80 ring-1 ring-black/5"
+                        className={`absolute left-0 right-0 top-full z-20 mt-2 max-h-64 overflow-auto rounded-2xl border py-2 shadow-lg ring-1 ${
+                          isFounderVip === true
+                            ? "border-white/20 bg-twizz-aubergine-surface ring-white/10"
+                            : "border-stone-100 bg-white shadow-stone-200/80 ring-black/5"
+                        }`}
                       >
                         {suggestionsLoading && suggestions.length === 0 && (
-                          <li className="px-4 py-3 text-left text-sm text-stone-500">
+                          <li
+                            className={`px-4 py-3 text-left text-sm ${
+                              isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
+                            }`}
+                          >
                             Searching…
                           </li>
                         )}
@@ -1865,12 +2052,20 @@ export default function Home() {
                             <li key={r.id} role="option">
                               <button
                                 type="button"
-                                className="w-full px-4 py-3 text-left text-base text-stone-900 transition-colors hover:bg-stone-100 focus:bg-stone-100 focus:outline-none"
+                                className={`w-full px-4 py-3 text-left text-base transition-colors focus:outline-none ${
+                                  isFounderVip === true
+                                    ? "text-twizz-vip-text hover:bg-white/10 focus:bg-white/10"
+                                    : "text-stone-900 hover:bg-stone-100 focus:bg-stone-100"
+                                }`}
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => selectDestination(r)}
                               >
                                 <span className="font-medium">{r.name}</span>
-                                <span className="mt-0.5 block text-sm text-stone-500">
+                                <span
+                                  className={`mt-0.5 block text-sm ${
+                                    isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
+                                  }`}
+                                >
                                   {[r.admin1, r.country].filter(Boolean).join(" · ")}
                                 </span>
                               </button>
@@ -1881,7 +2076,12 @@ export default function Home() {
                     )}
                 </div>
                 {!step1Valid && (
-                  <p id="step1-hint" className="mt-4 text-sm text-stone-400">
+                  <p
+                    id="step1-hint"
+                    className={`mt-4 text-sm ${
+                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
+                    }`}
+                  >
                     Enter a destination to continue.
                   </p>
                 )}
@@ -1900,13 +2100,21 @@ export default function Home() {
               aria-hidden={step !== 2}
             >
               <div className="flex flex-col items-center text-center">
-                <h1 className="mb-12 text-pretty text-3xl font-medium tracking-tight text-stone-900 sm:text-4xl lg:text-5xl">
+                <h1
+                  className={`mb-12 text-pretty text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl ${
+                    isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
+                  }`}
+                >
                   When and who?
                 </h1>
                 <div className="w-full space-y-10 text-left">
                   <div className="grid gap-10 sm:grid-cols-2">
                     <div>
-                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
+                      <label
+                        className={`mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider ${
+                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
+                        }`}
+                      >
                         <Calendar className="h-4 w-4" strokeWidth={1.5} />
                         Arrival date
                       </label>
@@ -1915,16 +2123,26 @@ export default function Home() {
                         value={formData.startDate}
                         onChange={(e) => updateField("startDate", e.target.value)}
                         required
-                        className={`w-full rounded-2xl border bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
+                        className={`w-full rounded-2xl border px-4 py-4 text-lg shadow-sm transition-colors focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 ${
+                          isFounderVip === true
+                            ? "bg-white/10 text-white placeholder:text-gray-400 border-white/20 focus:ring-white/30"
+                            : "bg-white text-stone-900 border-stone-200 focus:ring-stone-200"
+                        } ${
                           !formData.startDate.trim()
                             ? "border-amber-200 focus:border-amber-400"
-                            : "border-stone-200 focus:border-stone-900"
+                            : isFounderVip === true
+                              ? "focus:border-white"
+                              : "border-stone-200 focus:border-stone-900"
                         }`}
                         aria-invalid={!formData.startDate.trim()}
                       />
                     </div>
                     <div>
-                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
+                      <label
+                        className={`mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider ${
+                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
+                        }`}
+                      >
                         <Calendar className="h-4 w-4" strokeWidth={1.5} />
                         Departure date
                       </label>
@@ -1934,10 +2152,16 @@ export default function Home() {
                         onChange={(e) => updateField("endDate", e.target.value)}
                         min={formData.startDate || undefined}
                         required
-                        className={`w-full rounded-2xl border bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
+                        className={`w-full rounded-2xl border px-4 py-4 text-lg shadow-sm transition-colors focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 ${
+                          isFounderVip === true
+                            ? "bg-white/10 text-white placeholder:text-gray-400 border-white/20 focus:ring-white/30"
+                            : "bg-white text-stone-900 border-stone-200 focus:ring-stone-200"
+                        } ${
                           !formData.endDate.trim() || formData.endDate < formData.startDate
                             ? "border-amber-200 focus:border-amber-400"
-                            : "border-stone-200 focus:border-stone-900"
+                            : isFounderVip === true
+                              ? "focus:border-white"
+                              : "border-stone-200 focus:border-stone-900"
                         }`}
                         aria-invalid={!formData.endDate.trim() || formData.endDate < formData.startDate}
                       />
@@ -1945,7 +2169,11 @@ export default function Home() {
                   </div>
                   <div className="grid gap-10 sm:grid-cols-2">
                     <div>
-                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-stone-500">
+                      <label
+                        className={`mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider ${
+                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
+                        }`}
+                      >
                         <Users className="h-4 w-4" strokeWidth={1.5} />
                         How many people?
                       </label>
@@ -1957,13 +2185,21 @@ export default function Home() {
                         pattern="[0-9]*"
                         value={formData.people === "" ? "" : String(formData.people)}
                         onChange={(e) => updateField("people", e.target.value)}
-                        className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-4 text-lg text-stone-900 shadow-sm transition-colors focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className={`w-full rounded-2xl border px-4 py-4 text-lg shadow-sm transition-colors focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                          isFounderVip === true
+                            ? "bg-white/10 text-white placeholder:text-gray-400 border-white/20 focus:border-white focus:ring-white/30"
+                            : "border-stone-200 bg-white text-stone-900 focus:border-stone-900 focus:ring-stone-200"
+                        }`}
                       />
                     </div>
                   </div>
                 </div>
                 {!step2Valid && (
-                  <p className="mt-8 text-center text-sm text-stone-400">
+                  <p
+                    className={`mt-8 text-center text-sm ${
+                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
+                    }`}
+                  >
                     Choose arrival and departure dates to continue.
                   </p>
                 )}
@@ -1989,10 +2225,18 @@ export default function Home() {
                     aria-hidden
                   />
                 </div>
-                <h1 className="mb-4 text-pretty text-3xl font-medium tracking-tight text-stone-900 sm:text-4xl lg:text-5xl">
+                <h1
+                  className={`mb-4 text-pretty text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl ${
+                    isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
+                  }`}
+                >
                   What&apos;s the vibe?
                 </h1>
-                <p className="mb-10 max-w-lg text-pretty text-base leading-relaxed text-stone-500 sm:text-lg">
+                <p
+                  className={`mb-10 max-w-lg text-pretty text-base leading-relaxed sm:text-lg ${
+                    isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
+                  }`}
+                >
                   Tell us about the occasion, transportation preferences, or
                   specific things you must do.
                 </p>
@@ -2002,13 +2246,21 @@ export default function Home() {
                     onChange={(e) => updateField("vibe", e.target.value)}
                     placeholder="Romantic getaway, beach-only days, no driving after dark…"
                     rows={6}
-                    className="w-full resize-none rounded-3xl border border-stone-200 bg-white p-6 text-left text-lg leading-relaxed text-stone-900 shadow-sm placeholder:text-stone-400 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-200 sm:text-xl"
+                    className={`w-full resize-none rounded-3xl border p-6 text-left text-lg leading-relaxed shadow-sm focus:outline-none focus:ring-2 sm:text-xl ${
+                      isFounderVip === true
+                        ? "bg-white/10 text-twizz-vip-text border-white/20 placeholder:text-twizz-vip-text-muted focus:border-white focus:ring-white/30"
+                        : "border-stone-200 bg-white text-stone-900 placeholder:text-twizz-charcoal-subtle focus:border-stone-900 focus:ring-stone-200"
+                    }`}
                     autoFocus={step === 3}
                     aria-invalid={!step3Valid}
                   />
                 </div>
                 {!step3Valid && (
-                  <p className="mt-4 text-sm text-stone-400">
+                  <p
+                    className={`mt-4 text-sm ${
+                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
+                    }`}
+                  >
                     Add a few details about your trip to build your itinerary.
                   </p>
                 )}
@@ -2021,7 +2273,11 @@ export default function Home() {
               type="button"
               onClick={goBack}
               disabled={step === 1}
-              className="flex items-center gap-2 rounded-full px-5 py-3 text-base font-medium text-stone-600 transition-all duration-300 hover:bg-stone-100 hover:text-stone-900 disabled:pointer-events-none disabled:opacity-0"
+              className={`flex items-center gap-2 rounded-full px-5 py-3 text-base font-medium transition-all duration-300 disabled:pointer-events-none disabled:opacity-0 ${
+                isFounderVip === true
+                  ? "text-twizz-vip-text-muted hover:bg-white/10 hover:text-white"
+                  : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+              }`}
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={2} />
               Back
@@ -2047,9 +2303,7 @@ export default function Home() {
                 disabled={!step3Valid || generating}
                 aria-disabled={!step3Valid || generating}
                 className={`flex items-center gap-2 rounded-full px-10 py-4 text-lg font-semibold transition-all duration-300 ${
-                  step3Valid && !generating
-                    ? "bg-stone-900 text-white shadow-xl shadow-stone-900/20 hover:bg-stone-800 hover:shadow-2xl active:scale-[0.98]"
-                    : primaryDisabledClass
+                  step3Valid && !generating ? primaryEnabledClass : primaryDisabledClass
                 }`}
               >
                 {generating ? (

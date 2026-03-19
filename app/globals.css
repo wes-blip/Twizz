@@ -1,26 +1,137 @@
 @import "tailwindcss";
 
+/* ——— Minimalist Luxury Travel (Twizz) ——— */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f3ef;
+  --foreground: #2d2b28;
+  /* Standard (non–Founder VIP): rich off-white/pearl, soft charcoal */
+  --twizz-pearl: #f5f3ef;
+  --twizz-charcoal: #2d2b28;
+  --twizz-charcoal-muted: #5c5956;
+  --twizz-charcoal-subtle: #787572;
+  /* Founder VIP: deep premium purple (aubergine / midnight indigo), crisp light text */
+  --twizz-aubergine: #1a1625;
+  --twizz-aubergine-surface: #221e2e;
+  --twizz-vip-text: #f5f4f2;
+  --twizz-vip-text-muted: #c4c2be;
+  /* Smooth theme transition */
+  --twizz-transition-duration: 400ms;
+  --twizz-transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-twizz-pearl: var(--twizz-pearl);
+  --color-twizz-charcoal: var(--twizz-charcoal);
+  --color-twizz-charcoal-muted: var(--twizz-charcoal-muted);
+  --color-twizz-charcoal-subtle: var(--twizz-charcoal-subtle);
+  --color-twizz-aubergine: var(--twizz-aubergine);
+  --color-twizz-aubergine-surface: var(--twizz-aubergine-surface);
+  --color-twizz-vip-text: var(--twizz-vip-text);
+  --color-twizz-vip-text-muted: var(--twizz-vip-text-muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #1a1625;
+    --foreground: #f5f4f2;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Founder VIP theme: ensure readable light text on aubergine when state is active */
+[data-theme="vip"] .text-stone-900,
+[data-theme="vip"] .text-stone-800 {
+  color: var(--twizz-vip-text);
+}
+[data-theme="vip"] .text-stone-600,
+[data-theme="vip"] .text-stone-500 {
+  color: var(--twizz-vip-text-muted);
+}
+[data-theme="vip"] .text-stone-400 {
+  color: var(--twizz-vip-text-muted);
+  opacity: 0.9;
+}
+
+/* Itinerary cards: VIP = deep purple background, light text, refined border (front face only) */
+[data-theme="vip"] .itinerary-card:not(.vip-inset-light) {
+  background: var(--twizz-aubergine-surface);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+[data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-900,
+[data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-800 {
+  color: var(--twizz-vip-text);
+}
+[data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-700,
+[data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-600,
+[data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-500 {
+  color: var(--twizz-vip-text-muted);
+}
+
+/* VIP: solid light surfaces MUST use high-contrast dark text (accessibility) */
+[data-theme="vip"] .vip-inset-light .text-stone-900,
+[data-theme="vip"] .vip-inset-light.text-stone-900,
+[data-theme="vip"] .vip-inset-light .text-stone-800,
+[data-theme="vip"] .vip-inset-light.text-stone-800 { color: #1c1917; }
+[data-theme="vip"] .vip-inset-light .text-stone-700,
+[data-theme="vip"] .vip-inset-light.text-stone-700 { color: #44403c; }
+[data-theme="vip"] .vip-inset-light .text-stone-600,
+[data-theme="vip"] .vip-inset-light.text-stone-600 { color: #57534e; }
+[data-theme="vip"] .vip-inset-light .text-stone-500,
+[data-theme="vip"] .vip-inset-light.text-stone-500 { color: #78716c; }
+[data-theme="vip"] .vip-inset-light .text-stone-400,
+[data-theme="vip"] .vip-inset-light.text-stone-400 { color: #a8a29e; }
+[data-theme="vip"] .vip-inset-light input,
+[data-theme="vip"] .vip-inset-light select,
+[data-theme="vip"] .vip-inset-light textarea { color: #1c1917; }
+
+/* VIP: any light-background container gets dark text (cards, inputs, tabs) */
+[data-theme="vip"] .bg-white .text-stone-900,
+[data-theme="vip"] .bg-white.text-stone-900,
+[data-theme="vip"] .bg-white .text-stone-800,
+[data-theme="vip"] .bg-white.text-stone-800 { color: #1c1917; }
+[data-theme="vip"] .bg-white .text-stone-700,
+[data-theme="vip"] .bg-white .text-stone-600,
+[data-theme="vip"] .bg-white.text-stone-600 { color: #57534e; }
+[data-theme="vip"] .bg-white .text-stone-500 { color: #78716c; }
+[data-theme="vip"] .bg-white .text-stone-400 { color: #a8a29e; }
+[data-theme="vip"] .bg-white input,
+[data-theme="vip"] .bg-white select,
+[data-theme="vip"] .bg-white textarea { color: #1c1917; }
+[data-theme="vip"] .bg-white input::placeholder,
+[data-theme="vip"] .bg-white textarea::placeholder { color: #78716c; }
+[data-theme="vip"] .vip-inset-light input::placeholder,
+[data-theme="vip"] .vip-inset-light textarea::placeholder { color: #78716c; }
+
+[data-theme="vip"] [class*="bg-white/"] .text-stone-900,
+[data-theme="vip"] [class*="bg-white/"].text-stone-900,
+[data-theme="vip"] [class*="bg-white/"] .text-stone-800,
+[data-theme="vip"] [class*="bg-white/"].text-stone-800 { color: #1c1917; }
+[data-theme="vip"] [class*="bg-white/"] .text-stone-600,
+[data-theme="vip"] [class*="bg-white/"] .text-stone-500 { color: #57534e; }
+[data-theme="vip"] [class*="bg-white/"] input { color: #1c1917; }
+
+[data-theme="vip"] .bg-stone-50 .text-stone-900,
+[data-theme="vip"] .bg-stone-50 .text-stone-800,
+[data-theme="vip"] [class*="bg-stone-50"] .text-stone-900,
+[data-theme="vip"] [class*="bg-stone-50"] .text-stone-800 { color: #1c1917; }
+[data-theme="vip"] .bg-stone-50 .text-stone-700,
+[data-theme="vip"] .bg-stone-50 .text-stone-600,
+[data-theme="vip"] [class*="bg-stone-50"] .text-stone-600,
+[data-theme="vip"] [class*="bg-stone-50"] .text-stone-500 { color: #44403c; }
+[data-theme="vip"] .bg-stone-50 input,
+[data-theme="vip"] [class*="bg-stone-50"] input { color: #1c1917; }
+
+[data-theme="vip"] .bg-stone-100 .text-stone-900,
+[data-theme="vip"] .bg-stone-100 .text-stone-800 { color: #1c1917; }

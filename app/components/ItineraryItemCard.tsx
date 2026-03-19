@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
   GripVertical,
   Trash2,
@@ -8,66 +8,48 @@ import {
   X,
 } from "lucide-react";
 import { LiveHotelSearch, type HotelSearchResult } from "./LiveHotelSearch";
+import type { ItineraryBlock, ItineraryRichLocation } from "@/lib/itinerary-types";
+import {
+  blockLocationLabel,
+  emptyRichLocation,
+  stringToRichLocation,
+} from "@/lib/itinerary-types";
 
-type BookingOption = {
-  providerName: string;
-  url: string;
-  why: string;
-};
+export type { ItineraryBlock, ItineraryRichLocation } from "@/lib/itinerary-types";
 
-export type ItineraryBlock = {
-  id: string;
-  /** YYYY-MM-DD (start/check-in for accommodation) */
-  date: string;
-  /** YYYY-MM-DD optional end/check-out for accommodation */
-  endDate?: string;
-  location: string;
-  type: "accommodation" | "activity" | "logistics";
-  title: string;
-  /** Teaser for card front (accommodation: 2 sentences; others: 3–5 word TLDR). Fallback to description for legacy. */
-  summary?: string;
-  description: string;
-  bookingOptions?: BookingOption[];
-  isBooked?: boolean;
-  bookedName?: string;
-  confirmationNumber?: string;
-  cost?: string;
-  actualBookingUrl?: string;
-  isIncluded?: boolean;
-  /** Estimated price in dollars (saved to Supabase JSON) */
-  price?: number;
-  /** Google Place ID when user selects a hotel (for Accommodation blocks) */
-  googlePlaceId?: string;
-  /** Latitude when user selects a hotel (required for live price check) */
-  lat?: number;
-  /** Longitude when user selects a hotel (required for live price check) */
-  lng?: number;
-  /** Note when price came from test/fallback (e.g. nearest hotel in radius) */
-  priceNote?: string;
-  /** Hotelbeds temporary rate identifier (Availability → CheckRate → Book flow) */
-  rateKey?: string;
-  /** Hotelbeds rate type: 'BOOKABLE' (direct book) or 'RECHECK' (must call CheckRate first) */
-  rateType?: string;
-  /** Cancellation policy from the rate (string or structured object) */
-  cancellationPolicy?: string | Record<string, unknown>;
-  /** Cancellation policies array from rate (for pre-booking display); items may have from, amount, etc. */
-  cancellationPolicies?: Array<{ from?: string; amount?: number; [key: string]: unknown }>;
-  /** APItude flow state: 'searched' | 'quoted' | 'booked' */
-  bookingStatus?: string;
-  /** Final booking reference from Hotelbeds after booking */
-  confirmationCode?: string;
-  /** Supplier name from booking (for voucher legal text) */
-  supplierName?: string;
-  /** Supplier VAT from booking (for voucher legal text) */
-  supplierVat?: string;
-  /** Multi-line recommendations for accommodation: "Hotel Name - Vibe" per line */
-  recommendations?: string;
-};
+async function richLocationFromPlaceSelection(
+  place: HotelSearchResult
+): Promise<ItineraryRichLocation> {
+  let lat = 0;
+  let lng = 0;
+  try {
+    const res = await fetch(
+      `/api/hotels/place-details?placeId=${encodeURIComponent(place.id)}`
+    );
+    if (res.ok) {
+      const data = (await res.json()) as { lat?: unknown; lng?: unknown };
+      if (
+        typeof data.lat === "number" &&
+        typeof data.lng === "number" &&
+        Number.isFinite(data.lat) &&
+        Number.isFinite(data.lng)
+      ) {
+        lat = data.lat;
+        lng = data.lng;
+      }
+    }
+  } catch {
+    /* coordinates optional */
+  }
+  return { name: place.name, placeId: place.id, lat, lng };
+}
 
 type ItineraryItemCardProps = {
   block: ItineraryBlock;
   /** When true, only the front (read-only) content is shown; no drag/edit/discard. */
   readOnly?: boolean;
+  /** When true, use VIP/dark input styling (white text, dark glass); otherwise light inputs. */
+  isFounderVip?: boolean | null;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement> | null;
   dragInnerRef?: (el: HTMLElement | null) => void;
   dragDraggableProps?: object;
@@ -78,9 +60,34 @@ type ItineraryItemCardProps = {
   typeBadgeClass: (type: ItineraryBlock["type"]) => string;
 };
 
+const inputColorsVip =
+  "bg-white/10 border border-white/20 text-white placeholder:text-gray-400 focus:border-white/30 focus:ring-0 focus:outline-none";
+const inputColorsStandard =
+  "bg-white border border-stone-200 text-gray-900 placeholder:text-gray-500 focus:border-stone-400 focus:ring-2 focus:ring-stone-200 focus:outline-none";
+
+const placesSearchInputVip =
+  "mt-1 w-full rounded-lg py-2 pl-3 pr-10 text-sm bg-white/10 border border-white/20 focus:border-white/30 focus:ring-0 focus:outline-none !text-white placeholder:text-gray-400";
+const placesSearchInputLight =
+  "mt-1 w-full rounded-lg py-2 pl-3 pr-10 text-sm bg-white border border-stone-200 text-gray-900 placeholder:text-gray-500 focus:border-stone-400 focus:ring-2 focus:ring-stone-200 focus:outline-none";
+const placesSearchListVip =
+  "absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-lg py-1 bg-black/40 backdrop-blur-lg border border-white/10 shadow-2xl";
+const placesSearchListLight =
+  "absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg ring-1 ring-black/5";
+const placesSearchItemVip =
+  "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm text-white transition hover:bg-white/10";
+const placesSearchItemLight =
+  "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm text-stone-800 transition hover:bg-stone-50";
+
+const LIVE_WHOLESALE_API_PHRASE: Record<ItineraryBlock["type"], string> = {
+  accommodation: "global hotel APIs",
+  activity: "global activity & guide APIs",
+  logistics: "global transportation APIs",
+};
+
 export function ItineraryItemCard({
   block,
   readOnly = false,
+  isFounderVip = false,
   dragHandleProps = null,
   dragInnerRef,
   dragDraggableProps = {},
@@ -90,6 +97,39 @@ export function ItineraryItemCard({
   toggleIncludeInItinerary,
   typeBadgeClass,
 }: ItineraryItemCardProps) {
+  const isVip = isFounderVip === true;
+  const inputColors = isVip ? inputColorsVip : inputColorsStandard;
+  const placesInputClass = isVip ? placesSearchInputVip : placesSearchInputLight;
+  const placesListClass = isVip ? placesSearchListVip : placesSearchListLight;
+  const placesItemClass = isVip ? placesSearchItemVip : placesSearchItemLight;
+  const placesItemSelectedClass = isVip ? "bg-white/15" : "bg-amber-50 text-stone-900";
+  const placesEmptyClass = isVip ? "px-3 py-2 text-sm text-gray-400" : "px-3 py-2 text-sm text-stone-500";
+  const placesHintClass = isVip
+    ? "px-3 py-2 text-sm text-gray-500 select-none pointer-events-none border-t border-white/10 mt-1 pt-2"
+    : "px-3 py-2 text-sm text-stone-400 select-none pointer-events-none border-t border-stone-100 mt-1 pt-2";
+  const placesLoaderClass = isVip ? "text-gray-400" : "text-stone-400";
+  const placesItemLocationClass = isVip ? "text-gray-400" : "text-stone-500";
+  const placesItemBadgeClass = isVip
+    ? "shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-medium text-amber-200 ring-1 ring-amber-400/30"
+    : "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80";
+
+  const applyRichLocation = useCallback(
+    async (
+      place: HotelSearchResult,
+      field: "location" | "startLocation" | "endLocation"
+    ) => {
+      const rich = await richLocationFromPlaceSelection(place);
+      if (field === "location") {
+        updateBlock?.(block.id, { location: rich });
+      } else if (field === "startLocation") {
+        updateBlock?.(block.id, { startLocation: rich });
+      } else {
+        updateBlock?.(block.id, { endLocation: rich });
+      }
+    },
+    [block.id, updateBlock]
+  );
+
   const [isFlipped, setIsFlipped] = useState(false);
   const [isCheckingPrice, setIsCheckingPrice] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -106,6 +146,20 @@ export function ItineraryItemCard({
   };
 
   /** Super Parser: vibe tags from block.recommendations — accepts bullets (• - *), colons, hyphens, en-dashes */
+  /** Accommodation: hotel search reflects rich `location`; legacy rows may have title+googlePlaceId without `location`. */
+  const accommodationHotelFieldValue = useMemo(() => {
+    if (block.type !== "accommodation") return "";
+    if (block.googlePlaceId) {
+      const t = (block.title ?? "").trim();
+      if (t && t !== "Where to stay" && t !== "Where to Stay") return t;
+    }
+    const fromLoc = block.location?.name?.trim() ?? "";
+    if (fromLoc) return fromLoc;
+    const t = (block.title ?? "").trim();
+    if (t === "Where to stay" || t === "Where to Stay") return "";
+    return t;
+  }, [block.type, block.googlePlaceId, block.location?.name, block.title]);
+
   const vibeTags = useMemo(() => {
     if (block.type !== "accommodation") return [];
     const raw = (block.recommendations ?? "").trim();
@@ -164,12 +218,14 @@ export function ItineraryItemCard({
 
   if (readOnly) {
     return (
-      <div className="rounded-xl border border-stone-200/80 bg-white p-4 shadow-sm ring-1 ring-black/[0.03]">
+      <div className="itinerary-card rounded-xl border border-stone-200 bg-stone-50/80 p-4 shadow-md shadow-stone-200/50 ring-1 ring-stone-200/60 transition-shadow duration-200">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-stone-500">
+          <span className="text-sm font-medium text-stone-600">
             {block.endDate ? `${block.date} – ${block.endDate}` : block.date}
           </span>
-          <span className="min-w-0 truncate text-sm text-stone-600">{block.location}</span>
+          <span className="min-w-0 truncate text-sm text-stone-600">
+            {blockLocationLabel(block)}
+          </span>
           <span
             className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ring-1 ring-inset ${typeBadgeClass(block.type)}`}
           >
@@ -180,7 +236,7 @@ export function ItineraryItemCard({
           {block.isBooked ? (block.bookedName ?? block.title) : block.title || "Untitled"}
         </h3>
         {(block.summary ?? block.description) ? (
-          <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-600">
+          <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-700">
             {block.summary ?? block.description}
           </p>
         ) : null}
@@ -197,8 +253,8 @@ export function ItineraryItemCard({
     <li
       ref={dragInnerRef}
       {...dragDraggableProps}
-      className={`rounded-2xl border border-stone-200/80 bg-white shadow-sm ring-1 ring-black/[0.03] transition-shadow ${
-        snapshot.isDragging ? "shadow-lg ring-stone-200" : "hover:shadow-md"
+      className={`itinerary-card rounded-2xl border border-stone-200 bg-stone-50/80 shadow-md shadow-stone-200/50 ring-1 ring-stone-200/60 transition-all duration-200 ${
+        snapshot.isDragging ? "shadow-lg ring-stone-300" : "hover:shadow-lg hover:shadow-stone-300/40"
       }`}
     >
       <div className="flex gap-3 p-4 sm:p-5">
@@ -220,11 +276,27 @@ export function ItineraryItemCard({
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-stone-500">
+                    <span
+                      className={`text-sm font-medium ${
+                        block.type === "accommodation"
+                          ? "text-stone-600"
+                          : isFounderVip
+                            ? "text-white"
+                            : "text-gray-900"
+                      }`}
+                    >
                       {block.endDate ? `${block.date} – ${block.endDate}` : block.date}
                     </span>
-                    <span className="text-stone-300">·</span>
-                    <span className="min-w-0 truncate text-sm text-stone-600">{block.location}</span>
+                    <span className="text-stone-400">·</span>
+                    <span
+                      className={`min-w-0 truncate text-sm ${
+                        isFounderVip && block.type !== "accommodation"
+                          ? "text-gray-300"
+                          : "text-stone-600"
+                      }`}
+                    >
+                      {blockLocationLabel(block)}
+                    </span>
                   </div>
                   <span
                     className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ring-1 ring-inset ${typeBadgeClass(block.type)}`}
@@ -271,27 +343,35 @@ export function ItineraryItemCard({
                 {block.isBooked ? (block.bookedName ?? block.title) : block.title || "Untitled"}
               </h3>
               {(block.summary ?? block.description) ? (
-                <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-600">
+                <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-700">
                   {block.summary ?? block.description}
                 </p>
               ) : null}
               {typeof block.price === "number" && block.price > 0 && (
-                <span className="mt-2 inline-flex w-fit items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200/80">
+                <span
+                  className={`mt-2 inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-sm font-semibold ring-1 ${
+                    block.type === "accommodation"
+                      ? "bg-emerald-100 text-emerald-800 ring-emerald-200/80"
+                      : isFounderVip
+                        ? "bg-white/10 text-white ring-white/20"
+                        : "bg-emerald-100 text-emerald-800 ring-emerald-200/80"
+                  }`}
+                >
                   ${block.price ? Number(block.price).toFixed(2) : "0.00"}
                 </span>
               )}
             </div>
 
-            {/* Back — edit form; permanently [transform:rotateY(180deg)] so text faces forward when parent flips */}
+            {/* Back — edit form; no inner bucket, form sits in main card */}
             <div
-              className={`flex flex-col w-full overflow-y-auto rounded-2xl bg-white [backface-visibility:hidden] [transform:rotateY(180deg)] ${isFlipped ? "relative max-h-[70vh] sm:max-h-[500px]" : "absolute inset-0 top-0 left-0"}`}
+              className={`itinerary-card flex flex-col w-full overflow-y-auto rounded-2xl [backface-visibility:hidden] [transform:rotateY(180deg)] ${isFlipped ? "relative max-h-[70vh] sm:max-h-[500px]" : "absolute inset-0 top-0 left-0"}`}
             >
               <div className="space-y-3 p-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
                   {block.type === "accommodation" ? (
-                    <>
-                      <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                    <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-nowrap sm:items-end sm:gap-4">
+                      <div className="flex shrink-0 flex-col gap-1">
+                        <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
                           Check-in
                         </label>
                         <input
@@ -306,11 +386,11 @@ export function ItineraryItemCard({
                               bookingStatus: undefined,
                             })
                           }
-                          className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                          className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputColors}${isVip ? " !text-white [&_input]:!text-white [color-scheme:dark]" : ""}`}
                         />
                       </div>
-                      <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                      <div className="flex shrink-0 flex-col gap-1">
+                        <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
                           Check-out
                         </label>
                         <input
@@ -326,96 +406,101 @@ export function ItineraryItemCard({
                             })
                           }
                           min={block.date || undefined}
-                          className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                          className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputColors}${isVip ? " !text-white [&_input]:!text-white [color-scheme:dark]" : ""}`}
                         />
                       </div>
-                    </>
+                    </div>
                   ) : (
                     <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                      <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
                         Date
                       </label>
                       <input
                         type="date"
                         value={block.date}
                         onChange={(e) => updateBlock?.(block.id, { date: e.target.value })}
-                        className="w-full max-w-[11rem] rounded-lg border border-stone-200 bg-white px-2 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
+                        className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputColors}${
+                          isVip ? " !text-white [&_input]:!text-white [color-scheme:dark]" : ""
+                        }`}
                       />
                     </div>
                   )}
-                  <div className="min-w-0 flex-1 sm:min-w-[12rem]">
-                    <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                      Location
-                    </label>
-                    <input
-                      type="text"
-                      value={block.location}
-                      onChange={(e) => updateBlock?.(block.id, { location: e.target.value })}
-                      placeholder="City or area"
-                      className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                    Type
-                  </label>
-                  <select
-                    value={block.type}
-                    onChange={(e) =>
-                      updateBlock?.(block.id, {
-                        type: e.target.value as ItineraryBlock["type"],
-                      })
-                    }
-                    className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-sm text-stone-700 focus:border-stone-400 focus:outline-none"
-                  >
-                    <option value="activity">Activity</option>
-                    <option value="accommodation">Accommodation</option>
-                    <option value="logistics">Logistics</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                    Title
-                  </label>
-                  {block.type === "accommodation" ? (
-                    <input
-                      type="text"
-                      readOnly
-                      disabled
-                      value={
-                        block.isBooked
-                          ? (block.bookedName ?? block.title)
-                          : block.title === "Where to stay" || block.title === "Where to Stay"
-                            ? ""
-                            : block.title ?? ""
-                      }
-                      className="mt-1 w-full rounded-lg border border-stone-200 bg-stone-100 px-3 py-2 text-sm text-stone-600 cursor-not-allowed placeholder:text-stone-400"
-                      placeholder="Where to Stay"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={
-                        block.isBooked
-                          ? (block.bookedName ?? block.title)
-                          : block.title
-                      }
-                      onChange={(e) =>
-                        block.isBooked
-                          ? updateBlock?.(block.id, {
-                              bookedName: e.target.value,
-                            })
-                          : updateBlock?.(block.id, { title: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                      placeholder="Title"
-                    />
+                  {block.type === "activity" && (
+                    <div className="min-w-0 flex-1 sm:min-w-[12rem]">
+                      <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                        Location
+                      </label>
+                      <LiveHotelSearch
+                        searchApiBasePath="/api/places/autocomplete"
+                        value={(block.location ?? emptyRichLocation()).name}
+                        onSelect={(place) => {
+                          void applyRichLocation(place, "location");
+                        }}
+                        placeholder="Search for a place or area…"
+                        inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
+                        listClassName={placesListClass}
+                        listItemClassName={placesItemClass}
+                        listItemSelectedClassName={placesItemSelectedClass}
+                        listEmptyClassName={placesEmptyClass}
+                        listHintClassName={placesHintClass}
+                        loaderClassName={placesLoaderClass}
+                        listItemLocationClassName={placesItemLocationClass}
+                        listItemBadgeClassName={placesItemBadgeClass}
+                      />
+                    </div>
                   )}
                 </div>
+                {block.type === "logistics" && (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1">
+                      <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                        Start Location
+                      </label>
+                      <LiveHotelSearch
+                        searchApiBasePath="/api/places/autocomplete"
+                        value={(block.startLocation ?? emptyRichLocation()).name}
+                        onSelect={(place) => {
+                          void applyRichLocation(place, "startLocation");
+                        }}
+                        placeholder="Start point…"
+                        inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
+                        listClassName={placesListClass}
+                        listItemClassName={placesItemClass}
+                        listItemSelectedClassName={placesItemSelectedClass}
+                        listEmptyClassName={placesEmptyClass}
+                        listHintClassName={placesHintClass}
+                        loaderClassName={placesLoaderClass}
+                        listItemLocationClassName={placesItemLocationClass}
+                        listItemBadgeClassName={placesItemBadgeClass}
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                        End Location
+                      </label>
+                      <LiveHotelSearch
+                        searchApiBasePath="/api/places/autocomplete"
+                        value={(block.endLocation ?? emptyRichLocation()).name}
+                        onSelect={(place) => {
+                          void applyRichLocation(place, "endLocation");
+                        }}
+                        placeholder="End point…"
+                        inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
+                        listClassName={placesListClass}
+                        listItemClassName={placesItemClass}
+                        listItemSelectedClassName={placesItemSelectedClass}
+                        listEmptyClassName={placesEmptyClass}
+                        listHintClassName={placesHintClass}
+                        loaderClassName={placesLoaderClass}
+                        listItemLocationClassName={placesItemLocationClass}
+                        listItemBadgeClassName={placesItemBadgeClass}
+                      />
+                    </div>
+                  </div>
+                )}
                 {block.type !== "accommodation" && (
                   <div>
-                    <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                    <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
                       Description
                     </label>
                     <textarea
@@ -424,7 +509,7 @@ export function ItineraryItemCard({
                         updateBlock?.(block.id, { description: e.target.value })
                       }
                       rows={3}
-                      className="mt-1 w-full resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-2 text-sm leading-relaxed text-stone-600 placeholder:text-stone-400 focus:border-stone-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-200 whitespace-pre-wrap"
+                      className={`mt-1 w-full resize-y rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${inputColors}`}
                       placeholder="Description"
                     />
                   </div>
@@ -432,7 +517,7 @@ export function ItineraryItemCard({
                 {block.type === "accommodation" && (
                   <>
                     <div className="mb-4">
-                      <p className="text-sm text-gray-500 mb-3">
+                      <p className="text-sm text-gray-400 mb-3">
                         Click a vibe to see our hotel recs or type in the hotel you would like to stay at.
                       </p>
 
@@ -444,12 +529,19 @@ export function ItineraryItemCard({
                               type="button"
                               onClick={() =>
                                 updateBlock?.(block.id, {
-                                  ...block,
                                   title: tag.hotel,
                                   description: `Enjoy a stay at ${tag.hotel}, perfectly selected for its ${tag.vibe}.`,
+                                  location: stringToRichLocation(tag.hotel),
+                                  googlePlaceId: undefined,
+                                  lat: undefined,
+                                  lng: undefined,
+                                  price: undefined,
+                                  rateKey: undefined,
+                                  rateType: undefined,
+                                  bookingStatus: undefined,
                                 })
                               }
-                              className="px-4 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-full text-sm font-medium transition-colors cursor-pointer"
+                              className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white border border-white/10 rounded-full text-sm font-medium transition-colors cursor-pointer"
                             >
                               {tag.vibe}
                             </button>
@@ -458,43 +550,34 @@ export function ItineraryItemCard({
                       )}
                     </div>
                     <div>
-                      <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
+                      <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
                         Search for Official Hotel:
                       </label>
                     <LiveHotelSearch
-                      value={
-                        block.title === "Where to stay" || block.title === "Where to Stay"
-                          ? ""
-                          : block.title ?? ""
-                      }
+                      inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
+                      listClassName={placesListClass}
+                      listItemClassName={placesItemClass}
+                      listItemSelectedClassName={placesItemSelectedClass}
+                      listEmptyClassName={placesEmptyClass}
+                      listHintClassName={placesHintClass}
+                      loaderClassName={placesLoaderClass}
+                      listItemLocationClassName={placesItemLocationClass}
+                      listItemBadgeClassName={placesItemBadgeClass}
+                      value={accommodationHotelFieldValue}
                       onSelect={async (hotel: HotelSearchResult) => {
+                        const rich = await richLocationFromPlaceSelection(hotel);
                         updateBlock?.(block.id, {
                           title: hotel.name,
                           googlePlaceId: hotel.id,
+                          location: rich,
+                          lat: rich.lat,
+                          lng: rich.lng,
                           priceNote: undefined,
                           price: undefined,
                           rateKey: undefined,
                           rateType: undefined,
                           bookingStatus: undefined,
                         });
-                        try {
-                          const res = await fetch(
-                            `/api/hotels/place-details?placeId=${encodeURIComponent(hotel.id)}`
-                          );
-                          if (res.ok) {
-                            const { lat, lng } = await res.json();
-                            if (
-                              typeof lat === "number" &&
-                              typeof lng === "number" &&
-                              Number.isFinite(lat) &&
-                              Number.isFinite(lng)
-                            ) {
-                              updateBlock?.(block.id, { lat, lng });
-                            }
-                          }
-                        } catch {
-                          // Coordinates optional; user can still edit manually or retry
-                        }
                       }}
                       placeholder="Search our recommendations here..."
                     />
@@ -504,33 +587,33 @@ export function ItineraryItemCard({
                 <div>
                   {block.type === "accommodation" && block.bookingStatus === "booked" ? (
                     /* Area 4: Confirmed Voucher UI (post-booking) */
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+                    <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 backdrop-blur-sm p-4 space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-emerald-300">
                         Confirmed Voucher
                       </p>
                       <dl className="grid gap-1.5 text-sm">
                         <div>
-                          <dt className="text-stone-500">Hotel</dt>
-                          <dd className="font-medium text-stone-900">{block.title || "—"}</dd>
+                          <dt className="text-gray-400">Hotel</dt>
+                          <dd className="font-medium text-white">{block.title || "—"}</dd>
                         </div>
                         <div>
-                          <dt className="text-stone-500">Lead Guest</dt>
-                          <dd className="font-medium text-stone-900">Test User</dd>
+                          <dt className="text-gray-400">Lead Guest</dt>
+                          <dd className="font-medium text-white">Test User</dd>
                         </div>
                         <div>
-                          <dt className="text-stone-500">Check-in</dt>
-                          <dd className="font-medium text-stone-900">{block.date || "—"}</dd>
+                          <dt className="text-gray-400">Check-in</dt>
+                          <dd className="font-medium text-white">{block.date || "—"}</dd>
                         </div>
                         <div>
-                          <dt className="text-stone-500">Check-out</dt>
-                          <dd className="font-medium text-stone-900">{block.endDate ?? "—"}</dd>
+                          <dt className="text-gray-400">Check-out</dt>
+                          <dd className="font-medium text-white">{block.endDate ?? "—"}</dd>
                         </div>
                         <div>
-                          <dt className="text-stone-500">Conf Code</dt>
-                          <dd className="font-mono font-medium text-stone-900">{block.confirmationCode ?? "—"}</dd>
+                          <dt className="text-gray-400">Conf Code</dt>
+                          <dd className="font-mono font-medium text-white">{block.confirmationCode ?? "—"}</dd>
                         </div>
                       </dl>
-                      <p className="text-[11px] text-stone-500 leading-relaxed pt-1 border-t border-emerald-200/80">
+                      <p className="text-[11px] text-gray-400 leading-relaxed pt-1 border-t border-emerald-400/20">
                         Payable through Hotelbeds, acting as agent for the service operating company, details of which can be provided upon request. VAT: {block.supplierVat ?? "ESB28906881"} Reference: {block.confirmationCode ?? ""}
                       </p>
                       {block.confirmationCode && (
@@ -567,7 +650,7 @@ export function ItineraryItemCard({
                             }
                           }}
                           disabled={isCancelling}
-                          className="text-sm font-medium text-red-600 hover:text-red-700 hover:underline disabled:opacity-70 disabled:cursor-not-allowed"
+                          className="text-sm font-medium text-red-300 hover:text-red-200 hover:underline disabled:opacity-70 disabled:cursor-not-allowed"
                         >
                           {isCancelling ? "Cancelling…" : "Cancel booking"}
                         </button>
@@ -575,31 +658,39 @@ export function ItineraryItemCard({
                     </div>
                   ) : (
                     <>
+                      <div>
+                        <label className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                          Estimated Price ($)
+                        </label>
+                        <div className="mt-1 flex flex-row flex-wrap items-center gap-4">
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={block.price ?? ""}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const num = raw === "" ? undefined : parseFloat(raw);
+                              updateBlock?.(block.id, {
+                                price: num !== undefined && Number.isFinite(num) ? num : undefined,
+                              });
+                            }}
+                            placeholder="e.g. 450"
+                            className={`w-full max-w-[8rem] shrink-0 rounded-lg px-3 py-2 text-sm ${inputColors}${
+                              isVip ? " !text-white [&_input]:!text-white" : ""
+                            }`}
+                          />
+                          <p className="min-w-0 flex-1 text-sm italic leading-snug text-gray-400">
+                            Live Wholesale Pricing — We are currently connecting to{" "}
+                            {LIVE_WHOLESALE_API_PHRASE[block.type]} to bring you live, bookable rates.
+                          </p>
+                        </div>
+                      </div>
                       {block.type === "accommodation" && ENABLE_LIVE_BOOKING && (
-                        <>
-                          <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                            Estimated Price ($)
-                          </label>
-                          <div className="mt-1 flex items-center gap-3">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={block.price ?? ""}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const num = raw === "" ? undefined : parseFloat(raw);
-                                updateBlock?.(block.id, {
-                                  price: num !== undefined && Number.isFinite(num) ? num : undefined,
-                                });
-                              }}
-                              placeholder="e.g. 450"
-                              className="w-full max-w-[8rem] rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                            />
-                            <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1">
                               <div className="flex flex-wrap items-center gap-3">
                                 <div className="flex items-center gap-2">
-                                  <label className="text-xs text-stone-500">Adults</label>
+                                  <label className="text-xs text-gray-400">Adults</label>
                                   <input
                                     type="number"
                                     min={1}
@@ -608,11 +699,11 @@ export function ItineraryItemCard({
                                     onChange={(e) =>
                                       setAdults(Math.min(9, Math.max(1, parseInt(e.target.value, 10) || 1)))
                                     }
-                                    className="w-14 rounded border border-stone-200 bg-white px-2 py-1 text-sm text-stone-800 focus:border-stone-400 focus:outline-none"
+                                    className={`w-14 rounded px-2 py-1 text-sm ${inputColors}`}
                                   />
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <label className="text-xs text-stone-500">Children</label>
+                                  <label className="text-xs text-gray-400">Children</label>
                                   <input
                                     type="number"
                                     min={0}
@@ -627,14 +718,14 @@ export function ItineraryItemCard({
                                           : prev.slice(0, n)
                                       );
                                     }}
-                                    className="w-14 rounded border border-stone-200 bg-white px-2 py-1 text-sm text-stone-800 focus:border-stone-400 focus:outline-none"
+                                    className={`w-14 rounded px-2 py-1 text-sm ${inputColors}`}
                                   />
                                 </div>
                                 {children > 0 && (
                                   <div className="flex flex-wrap items-center gap-2">
                                     {Array.from({ length: children }, (_, i) => (
                                       <div key={i} className="flex items-center gap-1">
-                                        <label className="text-[11px] text-stone-400">Child {i + 1} age</label>
+                                        <label className="text-[11px] text-gray-400">Child {i + 1} age</label>
                                         <input
                                           type="number"
                                           min={0}
@@ -648,7 +739,7 @@ export function ItineraryItemCard({
                                               return next;
                                             });
                                           }}
-                                          className="w-12 rounded border border-stone-200 bg-white px-1.5 py-0.5 text-sm text-stone-800 focus:border-stone-400 focus:outline-none"
+                                          className={`w-12 rounded px-1.5 py-0.5 text-sm ${inputColors}`}
                                         />
                                       </div>
                                     ))}
@@ -656,7 +747,7 @@ export function ItineraryItemCard({
                                 )}
                               </div>
                               {cancellationNote && (
-                                <p className="text-xs text-amber-700/90">
+                                <p className="text-xs text-amber-300/90">
                                   {cancellationNote}
                                 </p>
                               )}
@@ -826,8 +917,8 @@ export function ItineraryItemCard({
                                   }
                                   className={`w-fit px-3 py-1.5 text-sm font-medium rounded-md transition disabled:opacity-70 disabled:cursor-not-allowed ${
                                     block.bookingStatus === "booked"
-                                      ? "bg-emerald-100 border border-emerald-300 text-emerald-800 cursor-default"
-                                      : "bg-stone-100 border border-stone-200 hover:bg-stone-200"
+                                      ? "bg-emerald-500/20 border border-emerald-400/30 text-emerald-200 cursor-default"
+                                      : "bg-white/10 border border-white/10 text-white hover:bg-white/20"
                                   }`}
                                 >
                                   {isCheckingPrice
@@ -843,52 +934,17 @@ export function ItineraryItemCard({
                                             : "Get Live Price"}
                                 </button>
                               </div>
-                              <p className="text-xs text-stone-500">
+                              <p className="text-xs text-gray-400">
                                 {block.googlePlaceId
                                   ? "✅ Official Hotel Linked"
                                   : "⚠️ Search and select a hotel above to check live prices"}
                               </p>
                               {block.priceNote && (
-                                <p className="text-xs text-amber-600">
+                                <p className="text-xs text-amber-300/90">
                                   {block.priceNote}
                                 </p>
                               )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                      {block.type === "accommodation" && !ENABLE_LIVE_BOOKING && (
-                        <div className="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-gray-700">Live Wholesale Pricing</p>
-                            <p className="text-xs text-gray-500">We are currently connecting to global hotel APIs to bring you live, bookable rates.</p>
-                          </div>
-                          <span className="px-3 py-1 bg-gray-200 text-gray-600 text-xs font-semibold rounded-full uppercase tracking-wider">Coming Soon</span>
                         </div>
-                      )}
-                      {block.type !== "accommodation" && (
-                        <>
-                          <label className="text-xs font-medium uppercase tracking-wider text-stone-400">
-                            Estimated Price ($)
-                          </label>
-                          <div className="mt-1 flex items-center gap-3">
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={block.price ?? ""}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const num = raw === "" ? undefined : parseFloat(raw);
-                                updateBlock?.(block.id, {
-                                  price: num !== undefined && Number.isFinite(num) ? num : undefined,
-                                });
-                              }}
-                              placeholder="e.g. 450"
-                              className="w-full max-w-[8rem] rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
-                            />
-                          </div>
-                        </>
                       )}
                     </>
                   )}
@@ -899,8 +955,8 @@ export function ItineraryItemCard({
                     onClick={() => toggleIncludeInItinerary?.(block.id)}
                     className={`rounded-xl p-2 transition ${
                       block.isIncluded === false
-                        ? "bg-red-50 text-red-600 hover:bg-red-100"
-                        : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                        ? "bg-red-500/20 text-red-300 hover:bg-red-500/30 border border-red-400/20"
+                        : "text-gray-400 hover:bg-white/10 hover:text-gray-300 border border-transparent"
                     }`}
                     aria-label={
                       block.isIncluded === false
@@ -918,14 +974,14 @@ export function ItineraryItemCard({
                   <button
                     type="button"
                     onClick={handleSave}
-                    className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800"
+                    className="inline-flex items-center gap-2 rounded-xl bg-white/20 border border-white/10 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-white/30"
                   >
                     Save
                   </button>
                   <button
                     type="button"
                     onClick={() => deleteBlock?.(block.id)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50"
+                    className="inline-flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/20"
                   >
                     <Trash2 className="h-4 w-4" strokeWidth={1.5} />
                     Delete
@@ -933,7 +989,7 @@ export function ItineraryItemCard({
                   <button
                     type="button"
                     onClick={() => setIsFlipped(false)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-medium text-gray-300 transition hover:bg-white/10"
                     aria-label="Cancel without saving"
                   >
                     <X className="h-4 w-4" strokeWidth={2} />
