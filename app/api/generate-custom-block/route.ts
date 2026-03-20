@@ -5,6 +5,7 @@ import {
   ITINERARY_SYSTEM_INSTRUCTION,
   SINGLE_BLOCK_MODE_APPENDIX,
   parseJsonFromGemini,
+  type GeminiGeoPlace,
   type ItineraryBlockPayload,
 } from "@/lib/itinerary-gemini-shared";
 
@@ -27,6 +28,33 @@ type CustomBlockRequest = {
     toLocation: string;
   };
 };
+
+function fallbackGeo(name: string): GeminiGeoPlace {
+  const n = name.trim();
+  return { name: n, lat: 0, lng: 0, placeId: "" };
+}
+
+function mergeGeo(
+  raw: GeminiGeoPlace | undefined,
+  fallbackName: string
+): GeminiGeoPlace {
+  if (
+    raw &&
+    typeof raw.lat === "number" &&
+    Number.isFinite(raw.lat) &&
+    typeof raw.lng === "number" &&
+    Number.isFinite(raw.lng) &&
+    (String(raw.name ?? "").trim() || raw.lat !== 0 || raw.lng !== 0)
+  ) {
+    return {
+      name: String(raw.name ?? "").trim() || fallbackName.trim(),
+      lat: raw.lat,
+      lng: raw.lng,
+      placeId: typeof raw.placeId === "string" ? raw.placeId : "",
+    };
+  }
+  return fallbackGeo(fallbackName);
+}
 
 function accommodationSummaryFromRecs(recommendations: string, people: number): string {
   const lines = recommendations
@@ -81,20 +109,34 @@ function normalizeSingleBlock(body: CustomBlockRequest, raw: ItineraryBlockPaylo
       description: desc,
       recommendations: rec,
       summary,
+      location: mergeGeo(base.location, body.tripDestination),
+    };
+  }
+
+  if (body.type === "logistics") {
+    const fromHint = body.logistics?.fromLocation ?? body.tripDestination;
+    const toHint = body.logistics?.toLocation ?? body.tripDestination;
+    const { location: _omit, ...rest } = base;
+    return {
+      ...rest,
+      title: base.title.trim(),
+      startLocation: mergeGeo(base.startLocation, fromHint),
+      endLocation: mergeGeo(base.endLocation, toHint),
+      summary: (base.summary || "").trim(),
+      description: (base.description || "").trim(),
     };
   }
 
   return {
     ...base,
     title: base.title.trim(),
-    location: base.location.trim() || body.tripDestination.trim(),
+    location: mergeGeo(base.location, body.tripDestination),
     summary: (base.summary || "").trim(),
     description: (base.description || "").trim(),
   };
 }
 
 function validationError(body: CustomBlockRequest, b: ItineraryBlockPayload): string | null {
-  if (!b.location?.trim()) return "Generated block missing location";
   if (!b.title?.trim()) return "Generated block missing title";
   if (!b.summary?.trim()) return "Generated block missing summary";
   if (!b.description?.trim()) return "Generated block missing description";
@@ -190,7 +232,7 @@ User payload:
 ${JSON.stringify(payloadForPrompt, null, 2)}
 
 Return ONLY valid minified JSON (no markdown, no code fences). Multi-line strings MUST use \\n—never literal newlines inside quotes.
-Shape: { "creativeTripName": "", "itineraryBlocks": [ ONE object with date, location, type, title, summary, description, and for accommodation only endDate and recommendations ] }
+Shape: { "creativeTripName": "", "itineraryBlocks": [ ONE object with date, type, title, summary, description; include "location", "startLocation", and "endLocation" (each { "name", "lat", "lng" }; optional "placeId": ""). For accommodation/activity: set startLocation and endLocation to duplicates of location. For logistics: real journey endpoints; set location = startLocation; obey STRICT LOGISTICS & ROUTING RULES (one Logistics per journey, no Activity for airport arrival). For accommodation only endDate and recommendations ] }
 Use these exact values in the block: type="${body.type}", date="${body.date}"${
     body.type === "accommodation" && body.endDate ? `, endDate="${body.endDate}"` : ""
   }.`;

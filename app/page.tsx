@@ -37,9 +37,13 @@ import {
   blockLocationLabel,
 } from "@/lib/itinerary-types";
 import { AddCustomBlockWizardModal } from "./components/AddCustomBlockWizardModal";
+import { LiveHotelSearch, type HotelSearchResult } from "./components/LiveHotelSearch";
+import MapTab from "./components/MapTab";
 import { v4 as uuidv4 } from "uuid";
 
 type FormData = {
+  /** Set only when the user picks a row from Google Places suggestions (cleared if they edit the field). */
+  origin: string;
   destination: string;
   startDate: string;
   endDate: string;
@@ -47,6 +51,10 @@ type FormData = {
   people: number | string;
   vibe: string;
 };
+
+/** Trip wizard step 1 — shared glass styling for origin and destination inputs. */
+const TRIP_WIZARD_LOCATION_INPUT_CLASS =
+  "w-full bg-slate-800/80 border border-white/10 rounded-xl px-4 py-3.5 pl-11 pr-10 text-base text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all";
 
 /** Timeline entry: either a real block or a synthetic "check-out" marker for multi-day items. */
 export type TimelineEntry =
@@ -123,6 +131,7 @@ function blocksForPersistence(blocks: ItineraryBlock[]): Record<string, unknown>
 }
 
 const initialFormData: FormData = {
+  origin: "",
   destination: "",
   startDate: "",
   endDate: "",
@@ -133,7 +142,7 @@ const initialFormData: FormData = {
 const TOTAL_STEPS = 3;
 
 function isStep1Valid(data: FormData) {
-  return data.destination.trim().length > 0;
+  return data.origin.trim().length > 0 && data.destination.trim().length > 0;
 }
 
 function isStep2Valid(data: FormData) {
@@ -579,6 +588,11 @@ export default function Home() {
     setDropdownOpen(false);
   }, []);
 
+  const selectOriginPlace = useCallback((place: HotelSearchResult) => {
+    const formatted = [place.name, place.location].filter(Boolean).join(" — ");
+    setFormData((prev) => ({ ...prev, origin: formatted }));
+  }, []);
+
   const step1Valid = isStep1Valid(formData);
   const step2Valid = isStep2Valid(formData);
   const step3Valid = isStep3Valid(formData);
@@ -939,6 +953,7 @@ export default function Home() {
       const headerDestination = firstLoc || name || undefined;
       setFormData((prev) => ({
         ...prev,
+        origin: "",
         ...(headerDestination ? { destination: headerDestination } : {}),
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
@@ -1085,11 +1100,7 @@ export default function Home() {
   // ——— Global top nav ———
   const topNav = (
     <header
-      className={`sticky top-0 z-30 border-b backdrop-blur-md transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] ${
-        isFounderVip === true
-          ? "border-white/10 bg-twizz-aubergine/70"
-          : "border-stone-200/80 bg-twizz-pearl/80"
-      }`}
+      className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)]"
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3">
@@ -1130,12 +1141,12 @@ export default function Home() {
           {isMenuOpen && (
             <>
               <div
-                className="fixed inset-0 z-40"
+                className="fixed inset-0 z-[99]"
                 aria-hidden="true"
                 onClick={() => setIsMenuOpen(false)}
               />
               <div
-                className={`absolute right-0 top-full z-50 mt-2 w-48 rounded-md border py-1 shadow-lg ${
+                className={`absolute right-0 top-full z-[100] mt-2 w-48 rounded-md border py-1 shadow-lg ${
                   isFounderVip === true
                     ? "border-white/20 bg-twizz-aubergine-surface text-white"
                     : "border-stone-200 bg-white"
@@ -1322,20 +1333,26 @@ export default function Home() {
   if (viewMode === "dashboard") {
     return (
       <div
-        className={`min-h-screen overflow-x-hidden transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
+        className={`min-h-screen transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
         data-theme={isFounderVip === true ? "vip" : undefined}
       >
         {authModal}
         {topNav}
-        <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold tracking-tight text-stone-900 sm:text-3xl">
-              My Trips
-            </h1>
-            <p className="mt-1 text-sm text-stone-500">
-              Open a saved itinerary or start fresh with New Trip.
-            </p>
-          </div>
+        {/* Sticky sub-nav: flush under main nav (h-16); content scrolls beneath */}
+        <div className="relative min-h-[calc(100vh-4rem)]">
+          <header
+            className="sticky top-16 z-40 w-full border-b border-white/10 bg-slate-900/80 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)]"
+          >
+            <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 md:px-8">
+              <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                My Trips
+              </h1>
+              <p className="mt-1 text-sm text-white/70">
+                Open a saved itinerary or start fresh with New Trip.
+              </p>
+            </div>
+          </header>
+          <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
 
           {loadTripError && (
             <div
@@ -1434,7 +1451,8 @@ export default function Home() {
               ))}
             </ul>
           )}
-        </main>
+          </main>
+        </div>
       </div>
     );
   }
@@ -1448,71 +1466,53 @@ export default function Home() {
       >
         {authModal}
         {topNav}
-        <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-          <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
-                Your itinerary
-              </p>
-              <h1 className={`mt-1 text-2xl font-semibold tracking-tight ${isFounderVip === true ? "text-white" : "text-stone-900"}`}>
-                {formData.destination}
-              </h1>
-              {formData.startDate && (
-                <p className={`mt-1 text-sm ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
-                  {formData.startDate} – {formData.endDate} ·{" "}
-                  {Number(formData.people) >= 1 ? Number(formData.people) : "—"}{" "}
-                  {Number(formData.people) === 1 ? "guest" : "guests"}
-                </p>
-              )}
-            </div>
-            <div className="flex shrink-0 items-center" aria-label="Estimated trip budget">
-              <div
-                className={`inline-flex items-center justify-between gap-3 rounded-2xl px-4 py-2.5 shadow-sm sm:gap-4 sm:px-5 ${
-                  isFounderVip === true
-                    ? "border border-white/15 bg-white/10 backdrop-blur-sm"
-                    : "border border-stone-200/90 bg-white/95 backdrop-blur-sm ring-1 ring-stone-200/50"
-                }`}
-              >
+        {/* Sticky sub-nav: flush under main nav (h-16); content scrolls beneath */}
+        <header
+          className="sticky top-16 z-40 w-full border-b border-white/10 bg-slate-900/80 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)]"
+        >
+          <div className="mx-auto max-w-2xl px-4 py-3 sm:px-6">
+            {/* Compact trip meta: dates (left) · travelers (right) */}
+            <div className="mb-2 flex flex-row items-center justify-between w-full">
+              <div className="min-w-0 flex items-center gap-1.5">
                 <span
-                  className={`text-[11px] font-semibold uppercase tracking-[0.18em] sm:text-xs ${
-                    isFounderVip === true ? "text-white/80" : "text-stone-500"
-                  }`}
-                >
-                  Est. budget
-                </span>
-                <span
-                  className={`font-bold tabular-nums tracking-tight sm:text-lg ${
+                  className={`text-xs font-medium tabular-nums ${
                     isFounderVip === true ? "text-white" : "text-stone-900"
                   }`}
                 >
-                  ${totalBudget.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formData.startDate.trim() ? formData.startDate : "—"}
+                </span>
+                <span
+                  className={`text-xs ${
+                    isFounderVip === true ? "text-white/50" : "text-stone-400"
+                  }`}
+                >
+                  →
+                </span>
+                <span
+                  className={`text-xs font-medium tabular-nums ${
+                    isFounderVip === true ? "text-white" : "text-stone-900"
+                  }`}
+                >
+                  {formData.endDate.trim() ? formData.endDate : "—"}
+                </span>
+              </div>
+              <div className="shrink-0 flex items-center gap-1.5">
+                <span
+                  className={`text-xs ${
+                    isFounderVip === true ? "text-white/50" : "text-stone-500"
+                  }`}
+                >
+                  TRAVELERS:
+                </span>
+                <span
+                  className={`text-xs font-medium tabular-nums ${
+                    isFounderVip === true ? "text-white" : "text-stone-900"
+                  }`}
+                >
+                  {Number(formData.people) >= 1 ? Number(formData.people) : "—"}
                 </span>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setViewMode("wizard");
-                setItineraryBlocks([]);
-                setCurrentTripId(null);
-                setTripStatus("draft");
-              }}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
-                isFounderVip === true
-                  ? "border border-white/20 bg-white/10 text-white hover:bg-white/20"
-                  : "border border-stone-200 bg-white text-stone-600 shadow-sm hover:bg-stone-50"
-              }`}
-            >
-              Edit trip
-            </button>
-          </header>
-
-          {/* Sticky workspace header: floating dock — trip name + Save Trip; frosted glass, rounded */}
-          <header
-            className={`sticky top-4 z-40 mx-4 mt-4 mb-6 rounded-2xl p-3 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] sm:mx-auto sm:max-w-screen-xl ${
-              isFounderVip === true ? "bg-twizz-aubergine/80" : "bg-twizz-pearl/80"
-            }`}
-          >
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
               <label className="min-w-0 flex-1">
                 <span className={`mb-1 block text-xs font-semibold uppercase tracking-wider ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
@@ -1569,7 +1569,52 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </header>
+          </div>
+        </header>
+
+        <div className="mx-auto max-w-2xl px-4 pb-8 pt-4 sm:px-6">
+          <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
+            <div className="flex shrink-0 items-center" aria-label="Estimated trip budget">
+              <div
+                className={`inline-flex items-center justify-between gap-3 rounded-2xl px-4 py-2.5 shadow-sm sm:gap-4 sm:px-5 ${
+                  isFounderVip === true
+                    ? "border border-white/15 bg-white/10 backdrop-blur-sm"
+                    : "border border-stone-200/90 bg-white/95 backdrop-blur-sm ring-1 ring-stone-200/50"
+                }`}
+              >
+                <span
+                  className={`text-[11px] font-semibold uppercase tracking-[0.18em] sm:text-xs ${
+                    isFounderVip === true ? "text-white/80" : "text-stone-500"
+                  }`}
+                >
+                  Est. budget
+                </span>
+                <span
+                  className={`font-bold tabular-nums tracking-tight sm:text-lg ${
+                    isFounderVip === true ? "text-white" : "text-stone-900"
+                  }`}
+                >
+                  ${totalBudget.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("wizard");
+                setItineraryBlocks([]);
+                setCurrentTripId(null);
+                setTripStatus("draft");
+              }}
+              className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
+                isFounderVip === true
+                  ? "border border-white/20 bg-white/10 text-white hover:bg-white/20"
+                  : "border border-stone-200 bg-white text-stone-600 shadow-sm hover:bg-stone-50"
+              }`}
+            >
+              Edit trip
+            </button>
+          </div>
 
           {/* Request VIP Booking modal */}
           <AddCustomBlockWizardModal
@@ -1778,9 +1823,9 @@ export default function Home() {
           })()}
 
           {activeView === "map" && (
-            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-stone-200 bg-white/80 py-16 text-center shadow-sm">
-              <p className="text-lg font-medium text-stone-500">Map View Coming Soon</p>
-            </div>
+            <MapTab
+              itineraryItems={itineraryBlocks.filter((b) => b.isIncluded !== false)}
+            />
           )}
 
           {activeView === "timeline" && (
@@ -1958,8 +2003,8 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="relative min-h-[320px] w-full max-w-2xl sm:min-h-[380px]">
-            {/* Step 1 — Destination */}
+          <div className="relative min-h-[420px] w-full max-w-2xl sm:min-h-[520px]">
+            {/* Step 1 — Origin + destination */}
             <div
               className={`transition-all duration-500 ease-out ${
                 step === 1
@@ -1972,60 +2017,124 @@ export default function Home() {
             >
               <div className="flex flex-col items-center text-center">
                 <h1
-                  className={`mb-12 text-pretty text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl ${
+                  className={`mb-10 text-pretty text-3xl font-medium tracking-tight sm:mb-12 sm:text-4xl lg:text-5xl ${
                     isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
                   }`}
                 >
                   Where do you want to escape to?
                 </h1>
-                <div ref={dropdownContainerRef} className="relative w-full">
-                  <MapPin
-                    className={`pointer-events-none absolute left-0 top-1/2 z-10 h-6 w-6 -translate-y-1/2 sm:left-1 ${
-                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
-                    }`}
-                    strokeWidth={1.5}
-                    aria-hidden
-                  />
-                  <input
-                    type="text"
-                    role="combobox"
-                    aria-expanded={dropdownOpen}
-                    aria-autocomplete="list"
-                    aria-controls="destination-suggestions"
-                    value={formData.destination}
-                    onChange={(e) => {
-                      updateField("destination", e.target.value);
-                      setDropdownOpen(true);
-                    }}
-                    onFocus={() => {
-                      if (
-                        suggestions.length > 0 ||
-                        formData.destination.trim().length >= GEOCODE_MIN_QUERY_LEN
-                      ) {
-                        setDropdownOpen(true);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setDropdownOpen(false);
-                        return;
-                      }
-                      if (e.key === "Enter" && step1Valid && !dropdownOpen) {
-                        e.preventDefault();
-                        goNext();
-                      }
-                    }}
-                    placeholder="City, region, or country"
-                    className={`relative z-0 w-full border-0 border-b-2 bg-transparent py-4 pl-10 pr-2 text-left text-xl focus:outline-none sm:pl-12 sm:text-2xl text-gray-100 placeholder:text-gray-400 ${
-                      isFounderVip === true
-                        ? "border-white/20 text-white placeholder:text-gray-400 focus:border-white"
-                        : "border-stone-200 text-twizz-charcoal placeholder:text-twizz-charcoal-subtle focus:border-twizz-charcoal"
-                    }`}
-                    autoFocus={step === 1}
-                    aria-invalid={!step1Valid}
-                    aria-describedby={!step1Valid ? "step1-hint" : undefined}
-                    autoComplete="off"
-                  />
+                <div className="w-full space-y-10 text-left">
+                  <div>
+                    <label
+                      htmlFor="trip-wizard-origin"
+                      className={`mb-3 block text-sm font-medium uppercase tracking-wider ${
+                        isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
+                      }`}
+                    >
+                      Where are you leaving from?
+                    </label>
+                    <div className="relative w-full">
+                      <LiveHotelSearch
+                        inputId="trip-wizard-origin"
+                        value={formData.origin}
+                        onSelect={selectOriginPlace}
+                        onQueryChange={() =>
+                          setFormData((prev) => ({ ...prev, origin: "" }))
+                        }
+                        searchApiBasePath="/api/places/autocomplete?profile=origin"
+                        placeholder="City, airport, or region"
+                        emptyMessage="No matching places. Keep typing."
+                        hintMessage="Select a suggestion to confirm your departure point."
+                        autoFocus={step === 1}
+                        inputClassName={TRIP_WIZARD_LOCATION_INPUT_CLASS}
+                        listClassName={`absolute left-0 right-0 top-full z-30 mt-2 max-h-64 w-full overflow-auto rounded-2xl border py-2 shadow-lg ring-1 ${
+                          isFounderVip === true
+                            ? "border-white/20 bg-twizz-aubergine-surface ring-white/10"
+                            : "border-stone-100 bg-white shadow-stone-200/80 ring-black/5"
+                        }`}
+                        listItemClassName={`flex cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left text-base transition focus:outline-none ${
+                          isFounderVip === true
+                            ? "text-twizz-vip-text hover:bg-white/10 focus:bg-white/10"
+                            : "text-stone-900 hover:bg-stone-100 focus:bg-stone-100"
+                        }`}
+                        listItemSelectedClassName={
+                          isFounderVip === true ? "bg-white/15" : "bg-stone-100"
+                        }
+                        listEmptyClassName={`px-4 py-3 text-left text-sm ${
+                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
+                        }`}
+                        listHintClassName={`mt-1 border-t px-4 pb-1 pt-3 text-sm select-none ${
+                          isFounderVip === true
+                            ? "border-white/10 text-twizz-vip-text-muted"
+                            : "border-stone-100 text-stone-400"
+                        }`}
+                        loaderClassName={
+                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-400"
+                        }
+                        listItemLocationClassName={
+                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
+                        }
+                        listItemBadgeClassName="hidden"
+                      />
+                      <Plane
+                        className="pointer-events-none absolute left-4 top-1/2 z-10 h-5 w-5 -translate-y-1/2 text-gray-400"
+                        strokeWidth={1.5}
+                        aria-hidden
+                      />
+                    </div>
+                  </div>
+                  <div ref={dropdownContainerRef} className="relative w-full">
+                    <label
+                      htmlFor="trip-wizard-destination"
+                      className={`mb-3 block text-sm font-medium uppercase tracking-wider ${
+                        isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
+                      }`}
+                    >
+                      Where are you headed?
+                    </label>
+                    <div className="relative w-full">
+                      <MapPin
+                        className="pointer-events-none absolute left-4 top-1/2 z-10 h-5 w-5 -translate-y-1/2 text-gray-400"
+                        strokeWidth={1.5}
+                        aria-hidden
+                      />
+                      <input
+                        id="trip-wizard-destination"
+                        type="text"
+                        role="combobox"
+                        aria-expanded={dropdownOpen}
+                        aria-autocomplete="list"
+                        aria-controls="destination-suggestions"
+                        value={formData.destination}
+                        onChange={(e) => {
+                          updateField("destination", e.target.value);
+                          setDropdownOpen(true);
+                        }}
+                        onFocus={() => {
+                          if (
+                            suggestions.length > 0 ||
+                            formData.destination.trim().length >= GEOCODE_MIN_QUERY_LEN
+                          ) {
+                            setDropdownOpen(true);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setDropdownOpen(false);
+                            return;
+                          }
+                          if (e.key === "Enter" && step1Valid && !dropdownOpen) {
+                            e.preventDefault();
+                            goNext();
+                          }
+                        }}
+                        placeholder="City, region, or country"
+                        className={TRIP_WIZARD_LOCATION_INPUT_CLASS}
+                        aria-invalid={!step1Valid}
+                        aria-describedby={!step1Valid ? "step1-hint" : undefined}
+                        autoComplete="off"
+                      />
+                    </div>
                   {dropdownOpen &&
                     (suggestionsLoading || suggestions.length > 0) && (
                       <ul
@@ -2074,15 +2183,16 @@ export default function Home() {
                         })}
                       </ul>
                     )}
+                  </div>
                 </div>
                 {!step1Valid && (
                   <p
                     id="step1-hint"
-                    className={`mt-4 text-sm ${
+                    className={`mt-4 text-center text-sm ${
                       isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
                     }`}
                   >
-                    Enter a destination to continue.
+                    Select your departure place from the suggestions and enter a destination to continue.
                   </p>
                 )}
               </div>

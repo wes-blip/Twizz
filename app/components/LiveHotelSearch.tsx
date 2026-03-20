@@ -15,6 +15,8 @@ export type HotelSearchResult = {
 type LiveHotelSearchProps = {
   value: string;
   onSelect: (hotel: HotelSearchResult) => void;
+  /** Fires when the user edits the input (clears committed selection in parent when needed). */
+  onQueryChange?: (query: string) => void;
   placeholder?: string;
   /** GET endpoint; `?query=` is appended. Default: hotel/lodging search. */
   searchApiBasePath?: string;
@@ -36,6 +38,13 @@ type LiveHotelSearchProps = {
   listItemLocationClassName?: string;
   /** Optional class for the VIP/Fora badge inside each result item */
   listItemBadgeClassName?: string;
+  /** Shown when the list is open, search returned nothing, and query is long enough */
+  emptyMessage?: string;
+  /** Bottom hint inside the list; set to empty string to hide */
+  hintMessage?: string;
+  autoFocus?: boolean;
+  /** For <label htmlFor="…"> association */
+  inputId?: string;
 };
 
 function normalizePlaceholderTitle(v: string): string {
@@ -59,6 +68,7 @@ const DEFAULT_SEARCH_API = "/api/hotels/search";
 export function LiveHotelSearch({
   value,
   onSelect,
+  onQueryChange,
   searchApiBasePath = DEFAULT_SEARCH_API,
   placeholder = "Search our recommendations here...",
   inputClassName = defaultInputClass,
@@ -70,6 +80,10 @@ export function LiveHotelSearch({
   loaderClassName = defaultLoaderClass,
   listItemLocationClassName = "text-stone-500",
   listItemBadgeClassName = "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80",
+  emptyMessage = "No hotels found. Keep typing.",
+  hintMessage = "Type a name to search all properties...",
+  autoFocus = false,
+  inputId,
 }: LiveHotelSearchProps) {
   const [inputValue, setInputValue] = useState(() => normalizePlaceholderTitle(value));
   const [results, setResults] = useState<HotelSearchResult[]>([]);
@@ -90,8 +104,9 @@ export function LiveHotelSearch({
   const runSearch = useCallback(async (q: string) => {
     setIsSearching(true);
     try {
+      const sep = searchApiBasePath.includes("?") ? "&" : "?";
       const res = await fetch(
-        `${searchApiBasePath}?query=${encodeURIComponent(q)}`
+        `${searchApiBasePath}${sep}query=${encodeURIComponent(q)}`
       );
       if (!res.ok) {
         setResults([]);
@@ -180,15 +195,21 @@ export function LiveHotelSearch({
     <div ref={wrapperRef} className="relative w-full">
       <div className="relative">
         <input
+          id={inputId}
           type="text"
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setInputValue(next);
+            onQueryChange?.(next);
+          }}
           onFocus={() => {
             if (results.length > 0) setIsOpen(true);
             if (!inputValue.trim()) runSearch("");
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
+          autoFocus={autoFocus}
           className={inputClassName}
           aria-expanded={isOpen}
           aria-autocomplete="list"
@@ -215,9 +236,7 @@ export function LiveHotelSearch({
           className={listClassName}
         >
           {results.length === 0 ? (
-            <li className={listEmptyClassName}>
-              No hotels found. Keep typing.
-            </li>
+            <li className={listEmptyClassName}>{emptyMessage}</li>
           ) : (
             <>
               {results.map((item, i) => (
@@ -245,12 +264,11 @@ export function LiveHotelSearch({
                   )}
                 </li>
               ))}
-              <li
-                className={listHintClassName}
-                aria-hidden
-              >
-                🔍 Type a name to search all properties...
-              </li>
+              {hintMessage ? (
+                <li className={listHintClassName} aria-hidden>
+                  {hintMessage}
+                </li>
+              ) : null}
             </>
           )}
         </ul>

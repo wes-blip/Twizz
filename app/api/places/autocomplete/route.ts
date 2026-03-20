@@ -40,15 +40,20 @@ export async function GET(request: Request) {
       return NextResponse.json([], { status: 500 });
     }
 
+    const profile = new URL(request.url).searchParams.get("profile");
+    const body: Record<string, unknown> = { input: query };
+    /** Favor cities, regions, and airports for trip origin (still returns other types if API allows). */
+    if (profile === "origin") {
+      body.includedPrimaryTypes = ["locality", "administrative_area_level_1", "airport"];
+    }
+
     const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": apiKey,
       },
-      body: JSON.stringify({
-        input: query,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
