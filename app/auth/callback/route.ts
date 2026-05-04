@@ -7,6 +7,10 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
+  const isProduction = process.env.NODE_ENV === "production";
+  const siteUrl = isProduction ? "https://twizz.travel" : request.nextUrl.origin;
+  let nextPath = next;
+  if (!nextPath.startsWith("/")) nextPath = `/${nextPath}`;
 
   if (code) {
     const cookieStore = await cookies();
@@ -33,10 +37,10 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(new URL(next, request.url));
+      return NextResponse.redirect(`${siteUrl}${nextPath}`);
     }
   }
 
   // On missing code or exchange error, redirect to home (or an error page)
-  return NextResponse.redirect(new URL("/", request.url));
+  return NextResponse.redirect(`${siteUrl}/`);
 }

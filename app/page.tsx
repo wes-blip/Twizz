@@ -54,7 +54,7 @@ type FormData = {
 
 /** Trip wizard step 1 — shared glass styling for origin and destination inputs. */
 const TRIP_WIZARD_LOCATION_INPUT_CLASS =
-  "w-full bg-slate-800/80 border border-white/10 rounded-xl px-4 py-3.5 pl-11 pr-10 text-base text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all";
+  "w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3.5 pl-11 pr-10 text-base text-white shadow-sm backdrop-blur placeholder:text-slate-400 transition-all focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-teal-500/40 focus:ring-offset-0 [color-scheme:dark]";
 
 /** Timeline entry: either a real block or a synthetic "check-out" marker for multi-day items. */
 export type TimelineEntry =
@@ -414,7 +414,7 @@ export default function Home() {
 
   // Auth
   const [user, setUser] = useState<any>(null);
-  /** Twizz Founders VIP theme: true = purple background, false/null = default. */
+  /** Twizz Founders VIP: profile flag for Beta Feedback link, badges, and gated features. */
   const [isFounderVip, setIsFounderVip] = useState<boolean | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -882,22 +882,18 @@ export default function Home() {
   };
 
   const primaryDisabledClass =
-    isFounderVip === true
-      ? "cursor-not-allowed bg-white/20 text-white/50 shadow-none hover:bg-white/20 hover:shadow-none active:scale-100"
-      : "cursor-not-allowed bg-stone-300 text-stone-500 shadow-none hover:bg-stone-300 hover:shadow-none active:scale-100";
+    "cursor-not-allowed bg-white/15 text-white/40 shadow-none hover:bg-white/15 hover:shadow-none active:scale-100";
   const primaryEnabledClass =
-    isFounderVip === true
-      ? "bg-white text-twizz-charcoal shadow-lg shadow-black/10 hover:bg-twizz-vip-text-muted hover:shadow-xl transition-colors duration-200 active:scale-[0.98]"
-      : "bg-twizz-charcoal text-white shadow-lg shadow-stone-900/15 hover:bg-stone-800 hover:shadow-xl transition-colors duration-200 active:scale-[0.98]";
+    "bg-white text-slate-950 shadow-lg shadow-black/25 hover:bg-slate-200 hover:shadow-xl transition-colors duration-200 active:scale-[0.98]";
 
   const typeBadgeClass = (type: ItineraryBlock["type"]) => {
     switch (type) {
       case "accommodation":
-        return "bg-emerald-50 text-emerald-800 ring-emerald-100";
+        return "bg-emerald-500/20 text-emerald-200 ring-emerald-400/30";
       case "logistics":
-        return "bg-sky-50 text-sky-800 ring-sky-100";
+        return "bg-sky-500/20 text-sky-200 ring-sky-400/30";
       default:
-        return "bg-amber-50 text-amber-900 ring-amber-100";
+        return "bg-amber-500/20 text-amber-200 ring-amber-400/30";
     }
   };
 
@@ -905,11 +901,11 @@ export default function Home() {
   const timelineBlurbClass = (type: ItineraryBlock["type"]) => {
     switch (type) {
       case "accommodation":
-        return "bg-green-50 text-green-800 border-green-200";
+        return "border border-emerald-500/30 bg-emerald-950/40 text-emerald-100";
       case "logistics":
-        return "bg-blue-50 text-blue-800 border-blue-200";
+        return "border border-sky-500/30 bg-sky-950/40 text-sky-100";
       default:
-        return "bg-orange-50 text-orange-800 border-orange-200";
+        return "border border-amber-500/30 bg-amber-950/40 text-amber-100";
     }
   };
 
@@ -1103,16 +1099,23 @@ export default function Home() {
       className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)]"
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleNewTrip}
-            className={`text-lg font-semibold tracking-tight transition-colors duration-200 hover:opacity-90 ${
-              isFounderVip === true ? "text-white" : "text-twizz-charcoal"
-            }`}
+            className="text-lg font-semibold tracking-tight text-white transition-colors duration-200 hover:opacity-90"
           >
             Twizz
           </button>
+          {isFounderVip === true && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-amber-400/35 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-100"
+              title="Founder VIP"
+            >
+              <Crown className="h-3 w-3 shrink-0 text-amber-300" strokeWidth={2} aria-hidden />
+              VIP
+            </span>
+          )}
         </div>
         <nav className="relative flex items-center gap-2">
           {isFounderVip === true && (
@@ -1127,11 +1130,7 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setIsMenuOpen((o) => !o)}
-            className={`flex h-9 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium shadow-sm transition-colors duration-200 ${
-              isFounderVip === true
-                ? "border-white/20 bg-white/10 text-white hover:bg-white/20"
-                : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50 hover:border-stone-300"
-            }`}
+            className="flex h-9 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors duration-200 hover:bg-white/20"
             aria-expanded={isMenuOpen}
             aria-haspopup="true"
           >
@@ -1146,11 +1145,7 @@ export default function Home() {
                 onClick={() => setIsMenuOpen(false)}
               />
               <div
-                className={`absolute right-0 top-full z-[100] mt-2 w-48 rounded-md border py-1 shadow-lg ${
-                  isFounderVip === true
-                    ? "border-white/20 bg-twizz-aubergine-surface text-white"
-                    : "border-stone-200 bg-white"
-                }`}
+                className="absolute right-0 top-full z-[100] mt-2 w-48 rounded-md border border-white/15 bg-slate-900/95 py-1 text-white shadow-lg backdrop-blur-xl"
                 role="menu"
               >
                 <button
@@ -1160,9 +1155,7 @@ export default function Home() {
                     handleNewTrip();
                     setIsMenuOpen(false);
                   }}
-                  className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                    isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
-                  }`}
+                  className="w-full px-4 py-2 text-left text-sm text-white/90 transition-colors hover:bg-white/10"
                 >
                   New Trip
                 </button>
@@ -1175,9 +1168,7 @@ export default function Home() {
                         setViewMode("dashboard");
                         setIsMenuOpen(false);
                       }}
-                      className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                        isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
-                      }`}
+                      className="w-full px-4 py-2 text-left text-sm text-white/90 transition-colors hover:bg-white/10"
                     >
                       My Trips
                     </button>
@@ -1188,9 +1179,7 @@ export default function Home() {
                         supabase?.auth.signOut();
                         setIsMenuOpen(false);
                       }}
-                      className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                        isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
-                      }`}
+                      className="w-full px-4 py-2 text-left text-sm text-white/90 transition-colors hover:bg-white/10"
                     >
                       Sign Out
                     </button>
@@ -1203,9 +1192,7 @@ export default function Home() {
                       setShowAuthModal(true);
                       setIsMenuOpen(false);
                     }}
-                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                      isFounderVip === true ? "hover:bg-white/10" : "text-stone-700 hover:bg-stone-100"
-                    }`}
+                    className="w-full px-4 py-2 text-left text-sm text-white/90 transition-colors hover:bg-white/10"
                   >
                     Sign In
                   </button>
@@ -1221,24 +1208,24 @@ export default function Home() {
   // ——— Auth Modal ———
   const authModal = showAuthModal && (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-stone-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
       aria-modal="true"
       role="dialog"
       aria-labelledby="auth-modal-title"
     >
-      <div className="relative w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl">
+      <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/90 p-6 shadow-2xl backdrop-blur-xl">
         <button
           type="button"
           onClick={closeAuthModal}
-          className="absolute right-4 top-4 rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+          className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
           aria-label="Close"
         >
           <X className="h-5 w-5" strokeWidth={2} />
         </button>
-        <h2 id="auth-modal-title" className="pr-8 text-xl font-semibold text-stone-900">
+        <h2 id="auth-modal-title" className="pr-8 text-xl font-semibold text-white">
           {authMode === "signin" ? "Sign In" : "Sign Up"}
         </h2>
-        <p className="mt-1 text-sm text-stone-500">
+        <p className="mt-1 text-sm text-slate-400">
           {authMode === "signin"
             ? "Enter your email and password."
             : "Create an account with your email and password."}
@@ -1258,19 +1245,19 @@ export default function Home() {
                 options: { redirectTo },
               });
             }}
-            className="flex w-full items-center justify-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3.5 text-sm font-medium text-stone-900 shadow-sm transition hover:border-stone-300 hover:bg-stone-50"
+            className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-slate-900/50 px-4 py-3.5 text-sm font-medium text-white shadow-sm backdrop-blur transition hover:border-white/25 hover:bg-slate-800/80"
           >
-            <Plane className="h-5 w-5 text-stone-600" strokeWidth={2} aria-hidden />
+            <Plane className="h-5 w-5 text-slate-400" strokeWidth={2} aria-hidden />
             Sign in with Google
           </button>
 
           {/* Divider */}
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center" aria-hidden>
-              <div className="w-full border-t border-stone-200" />
+              <div className="w-full border-t border-white/10" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-white px-3 text-xs font-medium uppercase tracking-wider text-stone-400">
+              <span className="bg-slate-900/90 px-3 text-xs font-medium uppercase tracking-wider text-slate-500">
                 OR
               </span>
             </div>
@@ -1279,7 +1266,7 @@ export default function Home() {
 
         <form onSubmit={handleAuthSubmit} className="space-y-4">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-400">
               Email
             </span>
             <input
@@ -1288,11 +1275,11 @@ export default function Home() {
               onChange={(e) => setAuthEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 text-gray-100 placeholder:text-gray-400"
+              className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3 text-white shadow-sm backdrop-blur placeholder:text-slate-500 focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/15 [color-scheme:dark]"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-stone-500">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-slate-400">
               Password
             </span>
             <input
@@ -1301,25 +1288,25 @@ export default function Home() {
               onChange={(e) => setAuthPassword(e.target.value)}
               required
               autoComplete={authMode === "signin" ? "current-password" : "new-password"}
-              className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 shadow-sm focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 text-gray-100 placeholder:text-gray-400"
+              className="w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 py-3 text-white shadow-sm backdrop-blur placeholder:text-slate-500 focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/15 [color-scheme:dark]"
             />
           </label>
           {authError && (
-            <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+            <p className="rounded-lg border border-red-500/30 bg-red-950/40 px-3 py-2 text-sm text-red-200" role="alert">
               {authError}
             </p>
           )}
           <div className="flex flex-col gap-3 pt-2">
             <button
               type="submit"
-              className="w-full rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800"
+              className="w-full rounded-xl bg-white py-3 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-slate-200"
             >
               {authMode === "signin" ? "Sign In" : "Sign Up"}
             </button>
             <button
               type="button"
               onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
-              className="text-sm text-stone-500 underline decoration-stone-300 underline-offset-2 hover:text-stone-700"
+              className="text-sm text-slate-400 underline decoration-white/20 underline-offset-2 hover:text-white"
             >
               {authMode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
             </button>
@@ -1333,8 +1320,8 @@ export default function Home() {
   if (viewMode === "dashboard") {
     return (
       <div
-        className={`min-h-screen transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
-        data-theme={isFounderVip === true ? "vip" : undefined}
+        className="min-h-screen bg-slate-950 text-white transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased"
+        data-theme="vip"
       >
         {authModal}
         {topNav}
@@ -1344,9 +1331,17 @@ export default function Home() {
             className="sticky top-16 z-40 w-full border-b border-white/10 bg-slate-900/80 backdrop-blur-xl transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)]"
           >
             <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 md:px-8">
-              <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                My Trips
-              </h1>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                  My Trips
+                </h1>
+                {isFounderVip === true && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/35 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold uppercase tracking-wider text-amber-100">
+                    <Crown className="h-3.5 w-3.5 text-amber-300" strokeWidth={2} aria-hidden />
+                    Founder VIP
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-sm text-white/70">
                 Open a saved itinerary or start fresh with New Trip.
               </p>
@@ -1356,7 +1351,7 @@ export default function Home() {
 
           {loadTripError && (
             <div
-              className="mb-6 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800"
+              className="mb-6 rounded-2xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200"
               role="alert"
             >
               {loadTripError}
@@ -1364,7 +1359,7 @@ export default function Home() {
           )}
 
           {!supabase && (
-            <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
               Connect Supabase in .env.local to see your saved trips.
             </div>
           )}
@@ -1372,16 +1367,16 @@ export default function Home() {
           {tripsLoading && (
             <div className="flex flex-col items-center justify-center py-16">
               <Loader2
-                className="h-10 w-10 animate-spin text-stone-400"
+                className="h-10 w-10 animate-spin text-slate-500"
                 aria-hidden
               />
-              <p className="mt-4 text-sm text-stone-500">Loading your trips…</p>
+              <p className="mt-4 text-sm text-slate-400">Loading your trips…</p>
             </div>
           )}
 
           {!tripsLoading && tripsError && (
             <div
-              className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800"
+              className="rounded-2xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200"
               role="alert"
             >
               {tripsError}
@@ -1389,12 +1384,12 @@ export default function Home() {
           )}
 
           {!tripsLoading && !tripsError && trips.length === 0 && supabase && (
-            <div className="rounded-2xl border border-stone-200 bg-white px-6 py-12 text-center shadow-sm">
-              <p className="text-stone-600">No saved trips yet.</p>
+            <div className="rounded-2xl border border-white/10 bg-slate-900/50 px-6 py-12 text-center shadow-lg shadow-black/20 ring-1 ring-white/5 backdrop-blur-md">
+              <p className="text-slate-300">No saved trips yet.</p>
               <button
                 type="button"
                 onClick={handleNewTrip}
-                className="mt-4 inline-flex rounded-full bg-stone-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-stone-800"
+                className="mt-4 inline-flex rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-slate-950 hover:bg-slate-200"
               >
                 Plan a trip
               </button>
@@ -1406,14 +1401,14 @@ export default function Home() {
               {trips.map((trip) => (
                 <li
                   key={trip.id}
-                  className="group relative flex min-w-0 w-full flex-col rounded-2xl border border-stone-200/90 bg-white p-5 shadow-sm ring-1 ring-black/[0.02] transition hover:border-stone-300 hover:shadow-md"
+                  className="group relative flex min-w-0 w-full flex-col rounded-2xl border border-white/10 bg-slate-900/50 p-5 shadow-lg shadow-black/25 ring-1 ring-white/5 backdrop-blur-md transition hover:border-white/20 hover:ring-white/10"
                 >
                   <div className="flex min-w-0 items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <h2 className="break-words whitespace-normal text-lg font-semibold text-stone-900">
+                      <h2 className="break-words whitespace-normal text-lg font-semibold text-white">
                         {trip.name}
                       </h2>
-                      <p className="mt-1 text-xs font-medium uppercase tracking-wider text-stone-400">
+                      <p className="mt-1 text-xs font-medium uppercase tracking-wider text-slate-500">
                         Saved {formatTripDate(trip.created_at)}
                       </p>
                     </div>
@@ -1421,7 +1416,7 @@ export default function Home() {
                       type="button"
                       onClick={() => void deleteTrip(trip.id)}
                       disabled={deletingId === trip.id}
-                      className="shrink-0 rounded-xl p-2 text-stone-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      className="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-red-500/15 hover:text-red-300 disabled:opacity-50"
                       aria-label="Delete trip"
                     >
                       {deletingId === trip.id ? (
@@ -1436,7 +1431,7 @@ export default function Home() {
                     type="button"
                     onClick={() => void loadTrip(trip.id)}
                     disabled={loadingTripId === trip.id}
-                    className="w-full rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-wait disabled:opacity-90"
+                    className="w-full rounded-xl bg-white py-3 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-slate-200 disabled:cursor-wait disabled:opacity-90"
                   >
                     {loadingTripId === trip.id ? (
                       <span className="inline-flex items-center justify-center gap-2">
@@ -1461,8 +1456,8 @@ export default function Home() {
   if (viewMode === "builder") {
     return (
       <div
-        className={`min-h-screen transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
-        data-theme={isFounderVip === true ? "vip" : undefined}
+        className="min-h-screen bg-slate-950 text-white transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased"
+        data-theme="vip"
       >
         {authModal}
         {topNav}
@@ -1474,48 +1469,24 @@ export default function Home() {
             {/* Compact trip meta: dates (left) · travelers (right) */}
             <div className="mb-2 flex flex-row items-center justify-between w-full">
               <div className="min-w-0 flex items-center gap-1.5">
-                <span
-                  className={`text-xs font-medium tabular-nums ${
-                    isFounderVip === true ? "text-white" : "text-stone-900"
-                  }`}
-                >
+                <span className="text-xs font-medium tabular-nums text-white">
                   {formData.startDate.trim() ? formData.startDate : "—"}
                 </span>
-                <span
-                  className={`text-xs ${
-                    isFounderVip === true ? "text-white/50" : "text-stone-400"
-                  }`}
-                >
-                  →
-                </span>
-                <span
-                  className={`text-xs font-medium tabular-nums ${
-                    isFounderVip === true ? "text-white" : "text-stone-900"
-                  }`}
-                >
+                <span className="text-xs text-white/50">→</span>
+                <span className="text-xs font-medium tabular-nums text-white">
                   {formData.endDate.trim() ? formData.endDate : "—"}
                 </span>
               </div>
               <div className="shrink-0 flex items-center gap-1.5">
-                <span
-                  className={`text-xs ${
-                    isFounderVip === true ? "text-white/50" : "text-stone-500"
-                  }`}
-                >
-                  TRAVELERS:
-                </span>
-                <span
-                  className={`text-xs font-medium tabular-nums ${
-                    isFounderVip === true ? "text-white" : "text-stone-900"
-                  }`}
-                >
+                <span className="text-xs text-white/50">TRAVELERS:</span>
+                <span className="text-xs font-medium tabular-nums text-white">
                   {Number(formData.people) >= 1 ? Number(formData.people) : "—"}
                 </span>
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
               <label className="min-w-0 flex-1">
-                <span className={`mb-1 block text-xs font-semibold uppercase tracking-wider ${isFounderVip === true ? "text-white/70" : "text-stone-500"}`}>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-white/70">
                   Trip name
                 </span>
                 <input
@@ -1523,17 +1494,13 @@ export default function Home() {
                   value={tripName}
                   onChange={(e) => setTripName(e.target.value)}
                   placeholder={`My ${formData.destination.trim() || "Destination"} Trip`}
-                  className={`h-12 w-full rounded-xl px-4 text-base font-medium shadow-sm focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 ${
-                    isFounderVip === true
-                      ? "bg-white/10 border border-white/20 text-white placeholder:text-gray-400 focus:border-white/30 focus:ring-0"
-                      : "border border-stone-200 bg-white text-gray-900 placeholder:text-gray-500 focus:border-stone-400 focus:ring-stone-200"
-                  }`}
+                  className="h-12 w-full rounded-xl border border-white/10 bg-slate-900/50 px-4 text-base font-medium text-white shadow-sm backdrop-blur placeholder:text-slate-400 focus:border-white/25 focus:outline-none focus:ring-2 focus:ring-white/20"
                 />
               </label>
               <div className="flex shrink-0 flex-col items-end gap-2">
                 {tripStatus === "booked" && (
-                  <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-                    <CheckCircle className="h-4 w-4 text-emerald-600" strokeWidth={2} aria-hidden />
+                  <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/15 px-4 py-3 text-sm font-semibold text-emerald-200">
+                    <CheckCircle className="h-4 w-4 text-emerald-400" strokeWidth={2} aria-hidden />
                     Trip Confirmed
                   </span>
                 )}
@@ -1544,12 +1511,10 @@ export default function Home() {
                     disabled={isSaving}
                     className={`flex h-12 items-center justify-center rounded-xl px-6 text-base font-semibold transition-all active:scale-[0.98] ${
                       isSaving
-                        ? "cursor-wait bg-stone-600 text-white"
+                        ? "cursor-wait bg-slate-600 text-white"
                         : saveJustSucceeded
                           ? "bg-emerald-600 text-white hover:bg-emerald-600"
-                          : isFounderVip === true
-                            ? "border border-purple-400/30 bg-purple-500/20 text-white shadow-lg shadow-stone-900/15 hover:bg-purple-500/30 disabled:opacity-90"
-                            : "border border-transparent bg-stone-900 text-white shadow-lg shadow-stone-900/15 hover:bg-stone-800 disabled:opacity-90"
+                          : "border border-white/15 bg-slate-900/50 text-white shadow-lg shadow-black/20 backdrop-blur-sm hover:bg-slate-800/80 disabled:opacity-90"
                     }`}
                   >
                     <span className="inline-flex items-center justify-center gap-2">
@@ -1575,25 +1540,11 @@ export default function Home() {
         <div className="mx-auto max-w-2xl px-4 pb-8 pt-4 sm:px-6">
           <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
             <div className="flex shrink-0 items-center" aria-label="Estimated trip budget">
-              <div
-                className={`inline-flex items-center justify-between gap-3 rounded-2xl px-4 py-2.5 shadow-sm sm:gap-4 sm:px-5 ${
-                  isFounderVip === true
-                    ? "border border-white/15 bg-white/10 backdrop-blur-sm"
-                    : "border border-stone-200/90 bg-white/95 backdrop-blur-sm ring-1 ring-stone-200/50"
-                }`}
-              >
-                <span
-                  className={`text-[11px] font-semibold uppercase tracking-[0.18em] sm:text-xs ${
-                    isFounderVip === true ? "text-white/80" : "text-stone-500"
-                  }`}
-                >
+              <div className="inline-flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-900/50 px-4 py-2.5 shadow-sm backdrop-blur-sm sm:gap-4 sm:px-5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80 sm:text-xs">
                   Est. budget
                 </span>
-                <span
-                  className={`font-bold tabular-nums tracking-tight sm:text-lg ${
-                    isFounderVip === true ? "text-white" : "text-stone-900"
-                  }`}
-                >
+                <span className="text-lg font-bold tabular-nums tracking-tight text-white sm:text-xl">
                   ${totalBudget.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
@@ -1606,11 +1557,7 @@ export default function Home() {
                 setCurrentTripId(null);
                 setTripStatus("draft");
               }}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
-                isFounderVip === true
-                  ? "border border-white/20 bg-white/10 text-white hover:bg-white/20"
-                  : "border border-stone-200 bg-white text-stone-600 shadow-sm hover:bg-stone-50"
-              }`}
+              className="shrink-0 rounded-full border border-white/15 bg-slate-900/40 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm transition hover:border-white/25 hover:bg-slate-800/60"
             >
               Edit trip
             </button>
@@ -1636,32 +1583,32 @@ export default function Home() {
 
           {showRequestBookingModal && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
               aria-modal="true"
               role="dialog"
               aria-labelledby="request-booking-modal-title"
             >
-              <div className="relative w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl">
+              <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/95 p-6 shadow-2xl backdrop-blur-xl">
                 <button
                   type="button"
                   onClick={() => setShowRequestBookingModal(false)}
-                  className="absolute right-4 top-4 rounded-lg p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-600"
+                  className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
                   aria-label="Close"
                 >
                   <X className="h-5 w-5" strokeWidth={2} />
                 </button>
-                <div className="flex items-center gap-3 text-amber-600">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+                <div className="flex items-center gap-3 text-amber-300">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-400/30 bg-amber-500/15">
                     <Bell className="h-5 w-5" strokeWidth={2} />
                   </div>
-                  <h2 id="request-booking-modal-title" className="text-xl font-semibold text-stone-900">
+                  <h2 id="request-booking-modal-title" className="text-xl font-semibold text-white">
                     Submit Booking Request?
                   </h2>
                 </div>
-                <p className="mt-4 text-sm leading-relaxed text-stone-600">
+                <p className="mt-4 text-sm leading-relaxed text-slate-400">
                   Our human advisors will review your itinerary, secure VIP perks (like room upgrades), and send you a soft quote. No credit card required.
                 </p>
-                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 ring-1 ring-amber-200/80">
+                <p className="mt-3 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-100">
                   Note: Only the items you have bookmarked will be submitted for booking.
                 </p>
                 <div className="mt-6 flex flex-col gap-3">
@@ -1675,7 +1622,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setShowRequestBookingModal(false)}
-                    className="w-full rounded-xl border border-stone-200 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50"
+                    className="w-full rounded-xl border border-white/15 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10"
                   >
                     Cancel
                   </button>
@@ -1687,7 +1634,7 @@ export default function Home() {
           {/* View mode tabs: Builder | Timeline | Map */}
           <div className="mb-6">
             <nav
-              className="flex rounded-full border border-stone-200 bg-white p-1 shadow-sm"
+              className="flex rounded-full border border-white/10 bg-slate-900/50 p-1 shadow-inner shadow-black/20 backdrop-blur-md"
               aria-label="Itinerary view"
             >
               {(
@@ -1703,8 +1650,8 @@ export default function Home() {
                   onClick={() => setActiveView(id)}
                   className={`flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition sm:flex-initial ${
                     activeView === id
-                      ? "bg-stone-900 text-white shadow-sm"
-                      : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+                      ? "bg-white text-slate-950 shadow-sm"
+                      : "text-slate-400 hover:bg-white/10 hover:text-white"
                   }`}
                   aria-current={activeView === id ? "true" : undefined}
                 >
@@ -1723,13 +1670,9 @@ export default function Home() {
               formData.startDate,
               formData.endDate
             );
-            const bucketDividerClass =
-              isFounderVip === true
-                ? "border-t border-white/10 mt-8 pt-8"
-                : "border-t border-stone-200/80 mt-8 pt-8";
-            const dayHeaderClass = `text-sm font-medium uppercase tracking-widest ${
-              isFounderVip === true ? "text-gray-400" : "text-stone-500"
-            }`;
+            const bucketDividerClass = "mt-8 border-t border-white/10 pt-8";
+            const dayHeaderClass =
+              "text-sm font-medium uppercase tracking-widest text-slate-400";
 
             return (
               <>
@@ -1778,16 +1721,12 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowAddBlockWizard(true)}
-                  className={`mt-6 w-full rounded-2xl border border-dashed py-4 text-sm font-medium shadow-sm transition ${
-                    isFounderVip === true
-                      ? "border-white/25 bg-white/5 text-white/80 backdrop-blur-sm hover:border-white/40 hover:bg-white/10 hover:text-white"
-                      : "border-stone-300 bg-white/60 text-stone-600 hover:border-stone-400 hover:bg-white hover:text-stone-900"
-                  }`}
+                  className="mt-6 w-full rounded-2xl border border-dashed border-white/20 bg-slate-900/30 py-4 text-sm font-medium text-white/80 shadow-sm backdrop-blur-sm transition hover:border-white/35 hover:bg-slate-900/50 hover:text-white"
                 >
                   Add block to itinerary
                 </button>
 
-                <hr className="my-8 border-gray-300" />
+                <hr className="my-8 border-white/10" />
 
                 {discardedBlocks.length > 0 && (
                   <div className="opacity-50 grayscale">
@@ -1809,11 +1748,11 @@ export default function Home() {
                 )}
 
                 <div className="mt-6 flex flex-col gap-4">
-                  <div className="rounded-2xl border border-stone-200 bg-white/90 px-5 py-4 shadow-sm ring-1 ring-black/[0.03]">
-                    <p className="text-sm font-medium uppercase tracking-wider text-stone-500">
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/50 px-5 py-4 shadow-lg shadow-black/20 ring-1 ring-white/5 backdrop-blur-md">
+                    <p className="text-sm font-medium uppercase tracking-wider text-slate-400">
                       Total Estimated Cost
                     </p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-stone-900">
+                    <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-white">
                       ${tripTotal.toLocaleString()}
                     </p>
                   </div>
@@ -1831,11 +1770,11 @@ export default function Home() {
           {activeView === "timeline" && (
             <div
               ref={timelineContainerRef}
-              className="relative border-l-2 border-stone-200 pl-10 sm:pl-12 transition-all duration-300 ease-[var(--twizz-transition-ease)]"
+              className="relative border-l-2 border-white/15 pl-10 sm:pl-12 transition-all duration-300 ease-[var(--twizz-transition-ease)]"
             >
               {groupBlocksByDateForTimeline(itineraryBlocks).length === 0 ? (
                 <div className="py-16 text-center">
-                  <p className="text-sm font-medium text-stone-500">
+                  <p className="text-sm font-medium text-slate-500">
                     Add items with dates in Builder to see your timeline.
                   </p>
                 </div>
@@ -1862,13 +1801,13 @@ export default function Home() {
                     <div key={group.date} className="relative pb-14 last:pb-0 transition-all duration-300 ease-[var(--twizz-transition-ease)]">
                       {/* Day header dot on track */}
                       <div
-                        className="absolute -left-10 sm:-left-12 top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-white bg-stone-900 shadow-md shadow-stone-300/50"
+                        className="absolute -left-10 sm:-left-12 top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-slate-950 bg-white shadow-md shadow-black/40"
                         aria-hidden
                       />
-                      <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">
+                      <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                         Day {group.dayIndex}
                       </h2>
-                      <p className="mt-0.5 text-base font-medium tracking-tight text-stone-900">
+                      <p className="mt-0.5 text-base font-medium tracking-tight text-white">
                         {group.dayLabel}
                       </p>
                       <ul className="mt-6 space-y-4">
@@ -1893,7 +1832,7 @@ export default function Home() {
                                   ref={(el) => {
                                     timelineLineEndRefs.current[source.id] = el;
                                   }}
-                                  className="absolute -left-10 sm:-left-12 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-white shadow-sm"
+                                  className="absolute -left-10 sm:-left-12 top-5 h-2 w-2 -translate-x-1/2 rounded-full bg-green-500 ring-2 ring-slate-950 shadow-sm"
                                   aria-hidden
                                 />
                                 <span
@@ -1902,7 +1841,7 @@ export default function Home() {
                                   Check out: {title}
                                 </span>
                                 {source.price != null && (
-                                  <span className="shrink-0 font-semibold text-stone-700">
+                                  <span className="shrink-0 font-semibold text-slate-300">
                                     ${Math.round(Number(source.price))}
                                   </span>
                                 )}
@@ -1929,10 +1868,10 @@ export default function Home() {
                                   if (isMultiDay)
                                     timelineLineStartRefs.current[block.id] = el;
                                 }}
-                                className={`absolute -left-10 sm:-left-12 top-5 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-white shadow-sm ${
+                                className={`absolute -left-10 sm:-left-12 top-5 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-slate-950 shadow-sm ${
                                   isMultiDay && isAccommodation
                                     ? "bg-green-500"
-                                    : "bg-stone-400"
+                                    : "bg-slate-500"
                                 }`}
                                 aria-hidden
                               />
@@ -1942,7 +1881,7 @@ export default function Home() {
                                 {blurbLabel}
                               </span>
                               {block.price != null && (
-                                <span className="shrink-0 font-semibold text-stone-700">
+                                <span className="shrink-0 font-semibold text-slate-300">
                                   ${Math.round(Number(block.price))}
                                 </span>
                               )}
@@ -1964,8 +1903,8 @@ export default function Home() {
   // ——— Wizard (multi-step form) ———
   return (
     <div
-      className={`min-h-screen transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased ${isFounderVip === true ? "bg-twizz-aubergine text-twizz-vip-text" : "bg-twizz-pearl text-twizz-charcoal"}`}
-      data-theme={isFounderVip === true ? "vip" : undefined}
+      className="min-h-screen bg-slate-950 text-white transition-colors duration-[400ms] ease-[var(--twizz-transition-ease)] antialiased"
+      data-theme="vip"
     >
       {authModal}
       {topNav}
@@ -1974,7 +1913,7 @@ export default function Home() {
         <main className="flex flex-1 flex-col items-center justify-center px-6 pb-12 pt-4">
           {generateError && (
             <div
-              className="mb-6 w-full max-w-2xl rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800"
+              className="mb-6 w-full max-w-2xl rounded-2xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200"
               role="alert"
             >
               {generateError}
@@ -1987,16 +1926,10 @@ export default function Home() {
                 key={i}
                 className={`h-1.5 rounded-full transition-all duration-500 ease-out ${
                   i + 1 === step
-                    ? isFounderVip === true
-                      ? "w-8 bg-white"
-                      : "w-8 bg-twizz-charcoal"
+                    ? "w-8 bg-white"
                     : i + 1 < step
-                      ? isFounderVip === true
-                        ? "w-1.5 bg-white/60"
-                        : "w-1.5 bg-stone-400"
-                      : isFounderVip === true
-                        ? "w-1.5 bg-white/20"
-                        : "w-1.5 bg-stone-200"
+                      ? "w-1.5 bg-white/60"
+                      : "w-1.5 bg-white/20"
                 }`}
                 aria-hidden
               />
@@ -2016,20 +1949,14 @@ export default function Home() {
               aria-hidden={step !== 1}
             >
               <div className="flex flex-col items-center text-center">
-                <h1
-                  className={`mb-10 text-pretty text-3xl font-medium tracking-tight sm:mb-12 sm:text-4xl lg:text-5xl ${
-                    isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
-                  }`}
-                >
+                <h1 className="mb-10 text-pretty text-3xl font-medium tracking-tight text-white sm:mb-12 sm:text-4xl lg:text-5xl">
                   Where do you want to escape to?
                 </h1>
                 <div className="w-full space-y-10 text-left">
                   <div>
                     <label
                       htmlFor="trip-wizard-origin"
-                      className={`mb-3 block text-sm font-medium uppercase tracking-wider ${
-                        isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
-                      }`}
+                      className="mb-3 block text-sm font-medium uppercase tracking-wider text-slate-400"
                     >
                       Where are you leaving from?
                     </label>
@@ -2047,33 +1974,13 @@ export default function Home() {
                         hintMessage="Select a suggestion to confirm your departure point."
                         autoFocus={step === 1}
                         inputClassName={TRIP_WIZARD_LOCATION_INPUT_CLASS}
-                        listClassName={`absolute left-0 right-0 top-full z-30 mt-2 max-h-64 w-full overflow-auto rounded-2xl border py-2 shadow-lg ring-1 ${
-                          isFounderVip === true
-                            ? "border-white/20 bg-twizz-aubergine-surface ring-white/10"
-                            : "border-stone-100 bg-white shadow-stone-200/80 ring-black/5"
-                        }`}
-                        listItemClassName={`flex cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left text-base transition focus:outline-none ${
-                          isFounderVip === true
-                            ? "text-twizz-vip-text hover:bg-white/10 focus:bg-white/10"
-                            : "text-stone-900 hover:bg-stone-100 focus:bg-stone-100"
-                        }`}
-                        listItemSelectedClassName={
-                          isFounderVip === true ? "bg-white/15" : "bg-stone-100"
-                        }
-                        listEmptyClassName={`px-4 py-3 text-left text-sm ${
-                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
-                        }`}
-                        listHintClassName={`mt-1 border-t px-4 pb-1 pt-3 text-sm select-none ${
-                          isFounderVip === true
-                            ? "border-white/10 text-twizz-vip-text-muted"
-                            : "border-stone-100 text-stone-400"
-                        }`}
-                        loaderClassName={
-                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-400"
-                        }
-                        listItemLocationClassName={
-                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
-                        }
+                        listClassName="absolute left-0 right-0 top-full z-30 mt-2 max-h-64 w-full overflow-auto rounded-2xl border border-white/15 bg-slate-900/95 py-2 shadow-lg shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl"
+                        listItemClassName="flex cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left text-base text-white transition hover:bg-white/10 focus:bg-white/10 focus:outline-none"
+                        listItemSelectedClassName="bg-white/15"
+                        listEmptyClassName="px-4 py-3 text-left text-sm text-slate-400"
+                        listHintClassName="mt-1 border-t border-white/10 px-4 pb-1 pt-3 text-sm text-slate-400 select-none"
+                        loaderClassName="text-slate-400"
+                        listItemLocationClassName="text-slate-400"
                         listItemBadgeClassName="hidden"
                       />
                       <Plane
@@ -2086,9 +1993,7 @@ export default function Home() {
                   <div ref={dropdownContainerRef} className="relative w-full">
                     <label
                       htmlFor="trip-wizard-destination"
-                      className={`mb-3 block text-sm font-medium uppercase tracking-wider ${
-                        isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
-                      }`}
+                      className="mb-3 block text-sm font-medium uppercase tracking-wider text-slate-400"
                     >
                       Where are you headed?
                     </label>
@@ -2140,18 +2045,10 @@ export default function Home() {
                       <ul
                         id="destination-suggestions"
                         role="listbox"
-                        className={`absolute left-0 right-0 top-full z-20 mt-2 max-h-64 overflow-auto rounded-2xl border py-2 shadow-lg ring-1 ${
-                          isFounderVip === true
-                            ? "border-white/20 bg-twizz-aubergine-surface ring-white/10"
-                            : "border-stone-100 bg-white shadow-stone-200/80 ring-black/5"
-                        }`}
+                        className="absolute left-0 right-0 top-full z-20 mt-2 max-h-64 overflow-auto rounded-2xl border border-white/15 bg-slate-900/95 py-2 shadow-lg shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl"
                       >
                         {suggestionsLoading && suggestions.length === 0 && (
-                          <li
-                            className={`px-4 py-3 text-left text-sm ${
-                              isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
-                            }`}
-                          >
+                          <li className="px-4 py-3 text-left text-sm text-slate-400">
                             Searching…
                           </li>
                         )}
@@ -2161,20 +2058,12 @@ export default function Home() {
                             <li key={r.id} role="option">
                               <button
                                 type="button"
-                                className={`w-full px-4 py-3 text-left text-base transition-colors focus:outline-none ${
-                                  isFounderVip === true
-                                    ? "text-twizz-vip-text hover:bg-white/10 focus:bg-white/10"
-                                    : "text-stone-900 hover:bg-stone-100 focus:bg-stone-100"
-                                }`}
+                                className="w-full px-4 py-3 text-left text-base text-white transition-colors hover:bg-white/10 focus:bg-white/10 focus:outline-none"
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => selectDestination(r)}
                               >
                                 <span className="font-medium">{r.name}</span>
-                                <span
-                                  className={`mt-0.5 block text-sm ${
-                                    isFounderVip === true ? "text-twizz-vip-text-muted" : "text-stone-500"
-                                  }`}
-                                >
+                                <span className="mt-0.5 block text-sm text-slate-400">
                                   {[r.admin1, r.country].filter(Boolean).join(" · ")}
                                 </span>
                               </button>
@@ -2188,9 +2077,7 @@ export default function Home() {
                 {!step1Valid && (
                   <p
                     id="step1-hint"
-                    className={`mt-4 text-center text-sm ${
-                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
-                    }`}
+                    className="mt-4 text-center text-sm text-slate-500"
                   >
                     Select your departure place from the suggestions and enter a destination to continue.
                   </p>
@@ -2210,21 +2097,13 @@ export default function Home() {
               aria-hidden={step !== 2}
             >
               <div className="flex flex-col items-center text-center">
-                <h1
-                  className={`mb-12 text-pretty text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl ${
-                    isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
-                  }`}
-                >
+                <h1 className="mb-12 text-pretty text-3xl font-medium tracking-tight text-white sm:text-4xl lg:text-5xl">
                   When and who?
                 </h1>
                 <div className="w-full space-y-10 text-left">
                   <div className="grid gap-10 sm:grid-cols-2">
                     <div>
-                      <label
-                        className={`mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider ${
-                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
-                        }`}
-                      >
+                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-slate-400">
                         <Calendar className="h-4 w-4" strokeWidth={1.5} />
                         Arrival date
                       </label>
@@ -2233,26 +2112,16 @@ export default function Home() {
                         value={formData.startDate}
                         onChange={(e) => updateField("startDate", e.target.value)}
                         required
-                        className={`w-full rounded-2xl border px-4 py-4 text-lg shadow-sm transition-colors focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 ${
-                          isFounderVip === true
-                            ? "bg-white/10 text-white placeholder:text-gray-400 border-white/20 focus:ring-white/30"
-                            : "bg-white text-stone-900 border-stone-200 focus:ring-stone-200"
-                        } ${
+                        className={`w-full rounded-2xl border px-4 py-4 text-lg text-white shadow-sm transition-colors [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-white/20 ${
                           !formData.startDate.trim()
-                            ? "border-amber-200 focus:border-amber-400"
-                            : isFounderVip === true
-                              ? "focus:border-white"
-                              : "border-stone-200 focus:border-stone-900"
+                            ? "border-amber-400/60 bg-slate-900/50 backdrop-blur focus:border-amber-400/80"
+                            : "border-white/15 bg-slate-900/50 backdrop-blur focus:border-white/40"
                         }`}
                         aria-invalid={!formData.startDate.trim()}
                       />
                     </div>
                     <div>
-                      <label
-                        className={`mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider ${
-                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
-                        }`}
-                      >
+                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-slate-400">
                         <Calendar className="h-4 w-4" strokeWidth={1.5} />
                         Departure date
                       </label>
@@ -2262,16 +2131,10 @@ export default function Home() {
                         onChange={(e) => updateField("endDate", e.target.value)}
                         min={formData.startDate || undefined}
                         required
-                        className={`w-full rounded-2xl border px-4 py-4 text-lg shadow-sm transition-colors focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 ${
-                          isFounderVip === true
-                            ? "bg-white/10 text-white placeholder:text-gray-400 border-white/20 focus:ring-white/30"
-                            : "bg-white text-stone-900 border-stone-200 focus:ring-stone-200"
-                        } ${
+                        className={`w-full rounded-2xl border px-4 py-4 text-lg text-white shadow-sm transition-colors [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-white/20 ${
                           !formData.endDate.trim() || formData.endDate < formData.startDate
-                            ? "border-amber-200 focus:border-amber-400"
-                            : isFounderVip === true
-                              ? "focus:border-white"
-                              : "border-stone-200 focus:border-stone-900"
+                            ? "border-amber-400/60 bg-slate-900/50 backdrop-blur focus:border-amber-400/80"
+                            : "border-white/15 bg-slate-900/50 backdrop-blur focus:border-white/40"
                         }`}
                         aria-invalid={!formData.endDate.trim() || formData.endDate < formData.startDate}
                       />
@@ -2279,11 +2142,7 @@ export default function Home() {
                   </div>
                   <div className="grid gap-10 sm:grid-cols-2">
                     <div>
-                      <label
-                        className={`mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider ${
-                          isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
-                        }`}
-                      >
+                      <label className="mb-3 flex items-center gap-2 text-sm font-medium uppercase tracking-wider text-slate-400">
                         <Users className="h-4 w-4" strokeWidth={1.5} />
                         How many people?
                       </label>
@@ -2295,21 +2154,13 @@ export default function Home() {
                         pattern="[0-9]*"
                         value={formData.people === "" ? "" : String(formData.people)}
                         onChange={(e) => updateField("people", e.target.value)}
-                        className={`w-full rounded-2xl border px-4 py-4 text-lg shadow-sm transition-colors focus:outline-none focus:ring-2 text-gray-100 placeholder:text-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
-                          isFounderVip === true
-                            ? "bg-white/10 text-white placeholder:text-gray-400 border-white/20 focus:border-white focus:ring-white/30"
-                            : "border-stone-200 bg-white text-stone-900 focus:border-stone-900 focus:ring-stone-200"
-                        }`}
+                        className="w-full rounded-2xl border border-white/15 bg-slate-900/50 px-4 py-4 text-lg text-white shadow-sm backdrop-blur transition-colors [appearance:textfield] [color-scheme:dark] placeholder:text-slate-400 focus:border-white/40 focus:outline-none focus:ring-2 focus:ring-white/20 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
                     </div>
                   </div>
                 </div>
                 {!step2Valid && (
-                  <p
-                    className={`mt-8 text-center text-sm ${
-                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
-                    }`}
-                  >
+                  <p className="mt-8 text-center text-sm text-slate-500">
                     Choose arrival and departure dates to continue.
                   </p>
                 )}
@@ -2335,18 +2186,10 @@ export default function Home() {
                     aria-hidden
                   />
                 </div>
-                <h1
-                  className={`mb-4 text-pretty text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl ${
-                    isFounderVip === true ? "text-twizz-vip-text" : "text-twizz-charcoal"
-                  }`}
-                >
+                <h1 className="mb-4 text-pretty text-3xl font-medium tracking-tight text-white sm:text-4xl lg:text-5xl">
                   What&apos;s the vibe?
                 </h1>
-                <p
-                  className={`mb-10 max-w-lg text-pretty text-base leading-relaxed sm:text-lg ${
-                    isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-muted"
-                  }`}
-                >
+                <p className="mb-10 max-w-lg text-pretty text-base leading-relaxed text-slate-400 sm:text-lg">
                   Tell us about the occasion, transportation preferences, or
                   specific things you must do.
                 </p>
@@ -2356,21 +2199,13 @@ export default function Home() {
                     onChange={(e) => updateField("vibe", e.target.value)}
                     placeholder="Romantic getaway, beach-only days, no driving after dark…"
                     rows={6}
-                    className={`w-full resize-none rounded-3xl border p-6 text-left text-lg leading-relaxed shadow-sm focus:outline-none focus:ring-2 sm:text-xl ${
-                      isFounderVip === true
-                        ? "bg-white/10 text-twizz-vip-text border-white/20 placeholder:text-twizz-vip-text-muted focus:border-white focus:ring-white/30"
-                        : "border-stone-200 bg-white text-stone-900 placeholder:text-twizz-charcoal-subtle focus:border-stone-900 focus:ring-stone-200"
-                    }`}
+                    className="w-full resize-none rounded-3xl border border-white/15 bg-slate-900/50 p-6 text-left text-lg leading-relaxed text-white shadow-sm backdrop-blur placeholder:text-slate-400 focus:border-white/40 focus:outline-none focus:ring-2 focus:ring-white/20 sm:text-xl [color-scheme:dark]"
                     autoFocus={step === 3}
                     aria-invalid={!step3Valid}
                   />
                 </div>
                 {!step3Valid && (
-                  <p
-                    className={`mt-4 text-sm ${
-                      isFounderVip === true ? "text-twizz-vip-text-muted" : "text-twizz-charcoal-subtle"
-                    }`}
-                  >
+                  <p className="mt-4 text-sm text-slate-500">
                     Add a few details about your trip to build your itinerary.
                   </p>
                 )}
@@ -2383,11 +2218,7 @@ export default function Home() {
               type="button"
               onClick={goBack}
               disabled={step === 1}
-              className={`flex items-center gap-2 rounded-full px-5 py-3 text-base font-medium transition-all duration-300 disabled:pointer-events-none disabled:opacity-0 ${
-                isFounderVip === true
-                  ? "text-twizz-vip-text-muted hover:bg-white/10 hover:text-white"
-                  : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
-              }`}
+              className="flex items-center gap-2 rounded-full px-5 py-3 text-base font-medium text-slate-400 transition-all duration-300 hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-0"
             >
               <ChevronLeft className="h-5 w-5" strokeWidth={2} />
               Back
@@ -2432,7 +2263,7 @@ export default function Home() {
           </div>
         </main>
 
-        <footer className="shrink-0 pb-8 text-center text-sm text-stone-400">
+        <footer className="shrink-0 pb-8 text-center text-sm text-slate-500">
           © {new Date().getFullYear()} Twizz
         </footer>
       </div>

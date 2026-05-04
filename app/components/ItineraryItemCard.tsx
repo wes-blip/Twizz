@@ -48,7 +48,7 @@ type ItineraryItemCardProps = {
   block: ItineraryBlock;
   /** When true, only the front (read-only) content is shown; no drag/edit/discard. */
   readOnly?: boolean;
-  /** When true, use VIP/dark input styling (white text, dark glass); otherwise light inputs. */
+  /** Founder VIP flag from profile (feature gating in parent); card UI is universal dark. */
   isFounderVip?: boolean | null;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement> | null;
   dragInnerRef?: (el: HTMLElement | null) => void;
@@ -60,23 +60,15 @@ type ItineraryItemCardProps = {
   typeBadgeClass: (type: ItineraryBlock["type"]) => string;
 };
 
-const inputColorsVip =
-  "bg-white/10 border border-white/20 text-white placeholder:text-gray-400 focus:border-white/30 focus:ring-0 focus:outline-none";
-const inputColorsStandard =
-  "bg-white border border-stone-200 text-gray-900 placeholder:text-gray-500 focus:border-stone-400 focus:ring-2 focus:ring-stone-200 focus:outline-none";
+const inputFieldClass =
+  "bg-slate-900/50 backdrop-blur border border-white/10 text-white placeholder:text-slate-400 focus:border-white/25 focus:ring-0 focus:outline-none [color-scheme:dark] [&_input]:!text-white";
 
-const placesSearchInputVip =
-  "mt-1 w-full rounded-lg py-2 pl-3 pr-10 text-sm bg-white/10 border border-white/20 focus:border-white/30 focus:ring-0 focus:outline-none !text-white placeholder:text-gray-400";
-const placesSearchInputLight =
-  "mt-1 w-full rounded-lg py-2 pl-3 pr-10 text-sm bg-white border border-stone-200 text-gray-900 placeholder:text-gray-500 focus:border-stone-400 focus:ring-2 focus:ring-stone-200 focus:outline-none";
-const placesSearchListVip =
-  "absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-lg py-1 bg-black/40 backdrop-blur-lg border border-white/10 shadow-2xl";
-const placesSearchListLight =
-  "absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg ring-1 ring-black/5";
-const placesSearchItemVip =
+const placesSearchInputClass =
+  "mt-1 w-full rounded-lg py-2 pl-3 pr-10 text-sm bg-slate-900/50 backdrop-blur border border-white/10 focus:border-white/25 focus:ring-0 focus:outline-none !text-white placeholder:text-slate-400";
+const placesSearchListClass =
+  "absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-lg py-1 bg-slate-900/70 backdrop-blur-xl border border-white/10 shadow-2xl";
+const placesSearchItemClass =
   "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm text-white transition hover:bg-white/10";
-const placesSearchItemLight =
-  "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-sm text-stone-800 transition hover:bg-stone-50";
 
 const LIVE_WHOLESALE_API_PHRASE: Record<ItineraryBlock["type"], string> = {
   accommodation: "global hotel APIs",
@@ -97,21 +89,14 @@ export function ItineraryItemCard({
   toggleIncludeInItinerary,
   typeBadgeClass,
 }: ItineraryItemCardProps) {
-  const isVip = isFounderVip === true;
-  const inputColors = isVip ? inputColorsVip : inputColorsStandard;
-  const placesInputClass = isVip ? placesSearchInputVip : placesSearchInputLight;
-  const placesListClass = isVip ? placesSearchListVip : placesSearchListLight;
-  const placesItemClass = isVip ? placesSearchItemVip : placesSearchItemLight;
-  const placesItemSelectedClass = isVip ? "bg-white/15" : "bg-amber-50 text-stone-900";
-  const placesEmptyClass = isVip ? "px-3 py-2 text-sm text-gray-400" : "px-3 py-2 text-sm text-stone-500";
-  const placesHintClass = isVip
-    ? "px-3 py-2 text-sm text-gray-500 select-none pointer-events-none border-t border-white/10 mt-1 pt-2"
-    : "px-3 py-2 text-sm text-stone-400 select-none pointer-events-none border-t border-stone-100 mt-1 pt-2";
-  const placesLoaderClass = isVip ? "text-gray-400" : "text-stone-400";
-  const placesItemLocationClass = isVip ? "text-gray-400" : "text-stone-500";
-  const placesItemBadgeClass = isVip
-    ? "shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-medium text-amber-200 ring-1 ring-amber-400/30"
-    : "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200/80";
+  const placesItemSelectedClass = "bg-white/15 text-white";
+  const placesEmptyClass = "px-3 py-2 text-sm text-slate-400";
+  const placesHintClass =
+    "px-3 py-2 text-sm text-slate-500 select-none pointer-events-none border-t border-white/10 mt-1 pt-2";
+  const placesLoaderClass = "text-slate-400";
+  const placesItemLocationClass = "text-slate-400";
+  const placesItemBadgeClass =
+    "shrink-0 rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-medium text-amber-200 ring-1 ring-amber-400/30";
 
   const applyRichLocation = useCallback(
     async (
@@ -253,14 +238,15 @@ export function ItineraryItemCard({
     <li
       ref={dragInnerRef}
       {...dragDraggableProps}
-      className={`itinerary-card rounded-2xl border border-stone-200 bg-stone-50/80 shadow-md shadow-stone-200/50 ring-1 ring-stone-200/60 transition-all duration-200 ${
-        snapshot.isDragging ? "shadow-lg ring-stone-300" : "hover:shadow-lg hover:shadow-stone-300/40"
+      data-founder-vip={isFounderVip === true ? "true" : "false"}
+      className={`itinerary-card rounded-2xl border border-white/10 bg-slate-900/50 shadow-lg shadow-black/30 ring-1 ring-white/5 backdrop-blur-md transition-all duration-200 ${
+        snapshot.isDragging ? "shadow-xl ring-white/15" : "hover:shadow-xl hover:ring-white/10"
       }`}
     >
       <div className="flex gap-3 p-4 sm:p-5">
         <div
           {...(dragHandleProps ?? {})}
-          className="flex shrink-0 cursor-grab touch-none items-start pt-1 text-stone-300 hover:text-stone-500 active:cursor-grabbing"
+          className="flex shrink-0 cursor-grab touch-none items-start pt-1 text-slate-500 hover:text-slate-300 active:cursor-grabbing"
           aria-label="Drag to reorder"
         >
           <GripVertical className="h-5 w-5" strokeWidth={1.5} />
@@ -278,21 +264,15 @@ export function ItineraryItemCard({
                   <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`text-sm font-medium ${
-                        block.type === "accommodation"
-                          ? "text-stone-600"
-                          : isFounderVip
-                            ? "text-white"
-                            : "text-gray-900"
+                        block.type === "accommodation" ? "text-slate-400" : "text-white"
                       }`}
                     >
                       {block.endDate ? `${block.date} – ${block.endDate}` : block.date}
                     </span>
-                    <span className="text-stone-400">·</span>
+                    <span className="text-slate-500">·</span>
                     <span
                       className={`min-w-0 truncate text-sm ${
-                        isFounderVip && block.type !== "accommodation"
-                          ? "text-gray-300"
-                          : "text-stone-600"
+                        block.type !== "accommodation" ? "text-slate-300" : "text-slate-400"
                       }`}
                     >
                       {blockLocationLabel(block)}
@@ -308,7 +288,7 @@ export function ItineraryItemCard({
                   <button
                     type="button"
                     onClick={() => setIsFlipped(true)}
-                    className="rounded-full p-2 text-blue-600 bg-blue-50 transition-colors hover:bg-blue-100"
+                    className="rounded-full border border-sky-500/25 bg-sky-500/15 p-2 text-sky-300 transition-colors hover:bg-sky-500/25"
                     aria-label="Edit / View details"
                   >
                     <Pencil className="h-5 w-5" strokeWidth={1.5} />
@@ -321,8 +301,8 @@ export function ItineraryItemCard({
                     }}
                     className={`rounded-xl p-2 transition ${
                       block.isIncluded === false
-                        ? "bg-red-50 text-red-600 hover:bg-red-100"
-                        : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+                        ? "bg-red-500/20 text-red-300 hover:bg-red-500/30"
+                        : "text-slate-500 hover:bg-white/10 hover:text-slate-300"
                     }`}
                     aria-label={
                       block.isIncluded === false
@@ -339,11 +319,11 @@ export function ItineraryItemCard({
                   </button>
                 </div>
               </div>
-              <h3 className="mt-2 line-clamp-2 min-w-0 text-lg font-semibold tracking-tight text-stone-900">
+              <h3 className="mt-2 line-clamp-2 min-w-0 text-lg font-semibold tracking-tight text-white">
                 {block.isBooked ? (block.bookedName ?? block.title) : block.title || "Untitled"}
               </h3>
               {(block.summary ?? block.description) ? (
-                <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-stone-700">
+                <p className="mt-1 line-clamp-2 text-sm text-ellipsis overflow-hidden text-slate-400">
                   {block.summary ?? block.description}
                 </p>
               ) : null}
@@ -351,10 +331,8 @@ export function ItineraryItemCard({
                 <span
                   className={`mt-2 inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-sm font-semibold ring-1 ${
                     block.type === "accommodation"
-                      ? "bg-emerald-100 text-emerald-800 ring-emerald-200/80"
-                      : isFounderVip
-                        ? "bg-white/10 text-white ring-white/20"
-                        : "bg-emerald-100 text-emerald-800 ring-emerald-200/80"
+                      ? "bg-emerald-500/15 text-emerald-200 ring-emerald-400/30"
+                      : "bg-white/10 text-white ring-white/15"
                   }`}
                 >
                   ${block.price ? Number(block.price).toFixed(2) : "0.00"}
@@ -386,7 +364,7 @@ export function ItineraryItemCard({
                               bookingStatus: undefined,
                             })
                           }
-                          className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputColors}${isVip ? " !text-white [&_input]:!text-white [color-scheme:dark]" : ""}`}
+                          className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputFieldClass}`}
                         />
                       </div>
                       <div className="flex shrink-0 flex-col gap-1">
@@ -406,7 +384,7 @@ export function ItineraryItemCard({
                             })
                           }
                           min={block.date || undefined}
-                          className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputColors}${isVip ? " !text-white [&_input]:!text-white [color-scheme:dark]" : ""}`}
+                          className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputFieldClass}`}
                         />
                       </div>
                     </div>
@@ -419,9 +397,7 @@ export function ItineraryItemCard({
                         type="date"
                         value={block.date}
                         onChange={(e) => updateBlock?.(block.id, { date: e.target.value })}
-                        className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputColors}${
-                          isVip ? " !text-white [&_input]:!text-white [color-scheme:dark]" : ""
-                        }`}
+                        className={`w-full max-w-[11rem] rounded-lg px-2 py-2 text-sm ${inputFieldClass}`}
                       />
                     </div>
                   )}
@@ -437,9 +413,9 @@ export function ItineraryItemCard({
                           void applyRichLocation(place, "location");
                         }}
                         placeholder="Search for a place or area…"
-                        inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
-                        listClassName={placesListClass}
-                        listItemClassName={placesItemClass}
+                        inputClassName={placesSearchInputClass}
+                        listClassName={placesSearchListClass}
+                        listItemClassName={placesSearchItemClass}
                         listItemSelectedClassName={placesItemSelectedClass}
                         listEmptyClassName={placesEmptyClass}
                         listHintClassName={placesHintClass}
@@ -463,9 +439,9 @@ export function ItineraryItemCard({
                           void applyRichLocation(place, "startLocation");
                         }}
                         placeholder="Start point…"
-                        inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
-                        listClassName={placesListClass}
-                        listItemClassName={placesItemClass}
+                        inputClassName={placesSearchInputClass}
+                        listClassName={placesSearchListClass}
+                        listItemClassName={placesSearchItemClass}
                         listItemSelectedClassName={placesItemSelectedClass}
                         listEmptyClassName={placesEmptyClass}
                         listHintClassName={placesHintClass}
@@ -485,9 +461,9 @@ export function ItineraryItemCard({
                           void applyRichLocation(place, "endLocation");
                         }}
                         placeholder="End point…"
-                        inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
-                        listClassName={placesListClass}
-                        listItemClassName={placesItemClass}
+                        inputClassName={placesSearchInputClass}
+                        listClassName={placesSearchListClass}
+                        listItemClassName={placesSearchItemClass}
                         listItemSelectedClassName={placesItemSelectedClass}
                         listEmptyClassName={placesEmptyClass}
                         listHintClassName={placesHintClass}
@@ -509,7 +485,7 @@ export function ItineraryItemCard({
                         updateBlock?.(block.id, { description: e.target.value })
                       }
                       rows={3}
-                      className={`mt-1 w-full resize-y rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${inputColors}`}
+                      className={`mt-1 w-full resize-y rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${inputFieldClass}`}
                       placeholder="Description"
                     />
                   </div>
@@ -554,9 +530,9 @@ export function ItineraryItemCard({
                         Search for Official Hotel:
                       </label>
                     <LiveHotelSearch
-                      inputClassName={`${placesInputClass}${isVip ? " !text-white" : ""}`}
-                      listClassName={placesListClass}
-                      listItemClassName={placesItemClass}
+                      inputClassName={placesSearchInputClass}
+                      listClassName={placesSearchListClass}
+                      listItemClassName={placesSearchItemClass}
                       listItemSelectedClassName={placesItemSelectedClass}
                       listEmptyClassName={placesEmptyClass}
                       listHintClassName={placesHintClass}
@@ -676,9 +652,7 @@ export function ItineraryItemCard({
                               });
                             }}
                             placeholder="e.g. 450"
-                            className={`w-full max-w-[8rem] shrink-0 rounded-lg px-3 py-2 text-sm ${inputColors}${
-                              isVip ? " !text-white [&_input]:!text-white" : ""
-                            }`}
+                            className={`w-full max-w-[8rem] shrink-0 rounded-lg px-3 py-2 text-sm ${inputFieldClass}`}
                           />
                           <p className="min-w-0 flex-1 text-sm italic leading-snug text-gray-400">
                             Live Wholesale Pricing — We are currently connecting to{" "}
@@ -699,7 +673,7 @@ export function ItineraryItemCard({
                                     onChange={(e) =>
                                       setAdults(Math.min(9, Math.max(1, parseInt(e.target.value, 10) || 1)))
                                     }
-                                    className={`w-14 rounded px-2 py-1 text-sm ${inputColors}`}
+                                    className={`w-14 rounded px-2 py-1 text-sm ${inputFieldClass}`}
                                   />
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -718,7 +692,7 @@ export function ItineraryItemCard({
                                           : prev.slice(0, n)
                                       );
                                     }}
-                                    className={`w-14 rounded px-2 py-1 text-sm ${inputColors}`}
+                                    className={`w-14 rounded px-2 py-1 text-sm ${inputFieldClass}`}
                                   />
                                 </div>
                                 {children > 0 && (
@@ -739,7 +713,7 @@ export function ItineraryItemCard({
                                               return next;
                                             });
                                           }}
-                                          className={`w-12 rounded px-1.5 py-0.5 text-sm ${inputColors}`}
+                                          className={`w-12 rounded px-1.5 py-0.5 text-sm ${inputFieldClass}`}
                                         />
                                       </div>
                                     ))}

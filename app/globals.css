@@ -2,18 +2,18 @@
 
 /* ——— Minimalist Luxury Travel (Twizz) ——— */
 :root {
-  --background: #f5f3ef;
-  --foreground: #2d2b28;
-  /* Standard (non–Founder VIP): rich off-white/pearl, soft charcoal */
-  --twizz-pearl: #f5f3ef;
-  --twizz-charcoal: #2d2b28;
-  --twizz-charcoal-muted: #5c5956;
-  --twizz-charcoal-subtle: #787572;
-  /* Founder VIP: deep premium purple (aubergine / midnight indigo), crisp light text */
-  --twizz-aubergine: #1a1625;
-  --twizz-aubergine-surface: #221e2e;
-  --twizz-vip-text: #f5f4f2;
-  --twizz-vip-text-muted: #c4c2be;
+  /* Universal premium dark (slate) */
+  --background: #020617;
+  --foreground: #f8fafc;
+  --twizz-pearl: #020617;
+  --twizz-charcoal: #e2e8f0;
+  --twizz-charcoal-muted: #94a3b8;
+  --twizz-charcoal-subtle: #64748b;
+  /* Surfaces aligned with slate-900 / glass cards */
+  --twizz-aubergine: #020617;
+  --twizz-aubergine-surface: #0f172a;
+  --twizz-vip-text: #f8fafc;
+  --twizz-vip-text-muted: #94a3b8;
   /* Smooth theme transition */
   --twizz-transition-duration: 400ms;
   --twizz-transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -36,8 +36,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #1a1625;
-    --foreground: #f5f4f2;
+    --background: #020617;
+    --foreground: #f8fafc;
   }
 }
 
@@ -49,7 +49,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Founder VIP theme: ensure readable light text on aubergine when state is active */
+/* Premium dark (data-theme=vip): ensure readable light text on deep surfaces */
 [data-theme="vip"] .text-stone-900,
 [data-theme="vip"] .text-stone-800 {
   color: var(--twizz-vip-text);
@@ -63,11 +63,13 @@ body {
   opacity: 0.9;
 }
 
-/* Itinerary cards: VIP = deep purple background, light text, refined border (front face only) */
+/* Itinerary cards: dark glass surface, light text (front face only) */
 [data-theme="vip"] .itinerary-card:not(.vip-inset-light) {
-  background: var(--twizz-aubergine-surface);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 [data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-900,
 [data-theme="vip"] .itinerary-card:not(.vip-inset-light) .text-stone-800 {
